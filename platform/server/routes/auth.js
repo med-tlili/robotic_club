@@ -17,11 +17,11 @@ function publicUser(u) {
 }
 
 // POST /api/auth/login
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase().trim());
+  const user = await db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase().trim());
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
     return res.status(401).json({ error: 'Invalid email or password' });
   }
@@ -35,7 +35,7 @@ router.post('/login', (req, res) => {
 // POST /api/auth/signup-professor — OPEN sign-up: anyone can register as
 // Professor at any time (user decision — no gate, no invite, no fresh-install
 // rule). Email must be unique; everything else is standard validation.
-router.post('/signup-professor', (req, res) => {
+router.post('/signup-professor', async (req, res) => {
   const { full_name, email, password } = req.body || {};
   const name = String(full_name || '').trim();
   const mail = String(email || '').trim().toLowerCase();
@@ -44,14 +44,14 @@ router.post('/signup-professor', (req, res) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) return res.status(400).json({ error: 'A valid email is required' });
   if (pwd.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
 
-  if (db.prepare('SELECT id FROM users WHERE email = ?').get(mail)) {
+  if (await db.prepare('SELECT id FROM users WHERE email = ?').get(mail)) {
     return res.status(409).json({ error: 'An account with this email already exists' });
   }
 
-  db.prepare('INSERT INTO users (email, password_hash, full_name, role) VALUES (?,?,?,?)')
+  await db.prepare('INSERT INTO users (email, password_hash, full_name, role) VALUES (?,?,?,?)')
     .run(mail, bcrypt.hashSync(pwd, 10), name, 'professor');
 
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(mail);
+  const user = await db.prepare('SELECT * FROM users WHERE email = ?').get(mail);
   const token = jwt.sign(
     { id: user.id, role: user.role, department_id: user.department_id, full_name: user.full_name },
     JWT_SECRET, { expiresIn: '7d' },
@@ -60,8 +60,8 @@ router.post('/signup-professor', (req, res) => {
 });
 
 // GET /api/auth/me
-router.get('/me', authenticate, (req, res) => {
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+router.get('/me', authenticate, async (req, res) => {
+  const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
   res.json(publicUser(user));
 });

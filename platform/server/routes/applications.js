@@ -16,8 +16,8 @@ const isBoss = (role) => ['leader', 'coleader'].includes(role);
 // GET /api/applications — who may see what:
 //   Leader/Co-Leader + Professor: all
 //   Manager: only applications for his own department
-router.get('/', authenticate, (req, res) => {
-  const rows = db.prepare(`
+router.get('/', authenticate, async (req, res) => {
+  const rows = await db.prepare(`
     SELECT a.*, u.full_name, u.email, u.role AS applicant_role, d.name AS department_name,
            r.full_name AS reviewer_name
     FROM applications a
@@ -36,40 +36,40 @@ router.get('/', authenticate, (req, res) => {
 });
 
 // POST /api/applications — Guests only, one pending at a time
-router.post('/', authenticate, (req, res) => {
+router.post('/', authenticate, async (req, res) => {
   if (req.user.role !== 'guest') {
     return res.status(403).json({ error: 'Only guests can apply to join a department' });
   }
   const { department_id, message } = req.body || {};
-  const dept = db.prepare('SELECT * FROM departments WHERE id = ?').get(Number(department_id));
+  const dept = await db.prepare('SELECT * FROM departments WHERE id = ?').get(Number(department_id));
   if (!dept || dept.slug === 'materials') return res.status(400).json({ error: 'Choose a valid department' });
 
-  const pending = db.prepare(
+  const pending = await db.prepare(
     "SELECT id FROM applications WHERE user_id = ? AND status = 'pending'"
   ).get(req.user.id);
   if (pending) return res.status(409).json({ error: 'You already have a pending application' });
 
-  const info = db.prepare(
+  const info = await db.prepare(
     'INSERT INTO applications (user_id, department_id, message) VALUES (?,?,?)'
   ).run(req.user.id, dept.id, (message || '').trim());
 
   // notify the reviewers: Leader + Co-Leader + this department's manager
-  const reviewers = db.prepare(
+  const reviewers = (await db.prepare(
     "SELECT id FROM users WHERE role IN ('leader','coleader') OR (role='manager' AND department_id = ?)"
-  ).all(dept.id).map((r) => r.id);
-  notifyMany(reviewers, {
+  ).all(dept.id)).map((r) => r.id);
+  await notifyMany(reviewers, {
     type: 'application',
     title: 'New membership application',
     body: `${req.user.full_name} applied to join ${dept.name}`,
     link: '/',
   }, req.user.id);
 
-  res.status(201).json(db.prepare('SELECT * FROM applications WHERE id = ?').get(info.lastInsertRowid));
+  res.status(201).json(await db.prepare('SELECT * FROM applications WHERE id = ?').get(info.lastInsertRowid));
 });
 
 // GET /api/applications/mine — the applicant's own status (guest view)
-router.get('/mine', authenticate, (req, res) => {
-  const rows = db.prepare(`
+router.get('/mine', authenticate, async (req, res) => {
+  const rows = await db.prepare(`
     SELECT a.*, d.name AS department_name FROM applications a
     JOIN departments d ON d.id = a.department_id
     WHERE a.user_id = ? ORDER BY a.created_at DESC
@@ -85,20 +85,20 @@ function canReview(user, deptId) {
 }
 
 // POST /api/applications/:id/accept — applicant becomes a member of that dept
-router.post('/:id/accept', authenticate, (req, res) => {
-  const app = db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
+router.post('/:id/accept', authenticate, async (req, res) => {
+  const app = await db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
   if (!app) return res.status(404).json({ error: 'Application not found' });
   if (app.status !== 'pending') return res.status(409).json({ error: 'Already reviewed' });
   if (!canReview(req.user, app.department_id)) {
     return res.status(403).json({ error: 'Only the Leader, Co-Leader or this department\'s manager can review' });
   }
-  db.prepare(
+  await db.prepare(
     "UPDATE applications SET status='accepted', reviewed_by=?, reviewed_at=datetime('now') WHERE id=?"
   ).run(req.user.id, app.id);
-  db.prepare('UPDATE users SET role=?, department_id=? WHERE id=?')
+  await db.prepare('UPDATE users SET role=?, department_id=? WHERE id=?')
     .run('member', app.department_id, app.user_id);
-  const dept = db.prepare('SELECT name, slug FROM departments WHERE id = ?').get(app.department_id);
-  notify(app.user_id, {
+  const dept = await db.prepare('SELECT name, slug FROM departments WHERE id = ?').get(app.department_id);
+  await notify(app.user_id, {
     type: 'application_result',
     title: 'Application accepted',
     body: `You are now a member of ${dept.name}`,
@@ -108,18 +108,18 @@ router.post('/:id/accept', authenticate, (req, res) => {
 });
 
 // POST /api/applications/:id/refuse
-router.post('/:id/refuse', authenticate, (req, res) => {
-  const app = db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
+router.post('/:id/refuse', authenticate, async (req, res) => {
+  const app = await db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
   if (!app) return res.status(404).json({ error: 'Application not found' });
   if (app.status !== 'pending') return res.status(409).json({ error: 'Already reviewed' });
   if (!canReview(req.user, app.department_id)) {
     return res.status(403).json({ error: 'Only the Leader, Co-Leader or this department\'s manager can review' });
   }
-  db.prepare(
+  await db.prepare(
     "UPDATE applications SET status='refused', reviewed_by=?, reviewed_at=datetime('now') WHERE id=?"
   ).run(req.user.id, app.id);
-  const deptR = db.prepare('SELECT name FROM departments WHERE id = ?').get(app.department_id);
-  notify(app.user_id, {
+  const deptR = await db.prepare('SELECT name FROM departments WHERE id = ?').get(app.department_id);
+  await notify(app.user_id, {
     type: 'application_result',
     title: 'Application reviewed',
     body: `Your application for ${deptR.name} was not accepted — you can apply again`,

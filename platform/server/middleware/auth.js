@@ -9,13 +9,13 @@ const JWT_SECRET = process.env.JWT_SECRET || 'isigk-robotics-dev-secret-change-i
 // Attaches req.user if a valid token is provided.
 // Role/department are always re-read from the DB so that a promotion,
 // department change or removal takes effect immediately (no re-login).
-function authenticate(req, res, next) {
+async function authenticate(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return res.status(401).json({ error: 'Missing token' });
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    const fresh = db.prepare('SELECT id, full_name, role, department_id FROM users WHERE id = ?')
+    const fresh = await db.prepare('SELECT id, full_name, role, department_id FROM users WHERE id = ?')
       .get(payload.id);
     if (!fresh) return res.status(401).json({ error: 'Account no longer exists' });
     req.user = { ...payload, ...fresh };

@@ -1,6 +1,12 @@
 // ============================================================
 //  storage.js — where uploaded files live and how they are protected
 //
+//  Two backends, same API (chosen automatically):
+//    · local disk (default)  →  uploads/public | uploads/private
+//    · Vercel Blob (cloud)   →  keys uploads/public/… | uploads/private/…
+//      activated by BLOB_READ_WRITE_TOKEN — used on Vercel where the
+//      filesystem is read-only and ephemeral
+//
 //  uploads/public  → images published on the public feed
 //                    (intentionally visible to guests — they are
 //                    published content, like the posts themselves)
@@ -9,12 +15,15 @@
 //                    HMAC-signed URLs that expire after 24h)
 //
 //  Rules of this module:
-//   - disk names are RANDOM (the original filename never touches
-//     disk; it is kept in the DB for display only)
+//   - disk/blob names are RANDOM (the original filename never touches
+//     storage; it is kept in the DB for display only)
 //   - every DB deletion must call deleteUpload() so no orphan
 //     file is left behind
 //   - sharing an album photo to the public feed COPIES the file
-//     into /uploads/public so the album keeps its own copy
+//     into the public tree so the album keeps its own copy
+//   - public files: served straight from the store (Blob URL redirect)
+//   - private files: the API PROXIES the bytes after checking the HMAC
+//     signature, so the store URL itself is never exposed to the browser
 // ============================================================
 const fs = require('fs');
 const path = require('path');
@@ -28,7 +37,14 @@ const PRIVATE_DIR = path.join(UPLOAD_ROOT, 'private');
 
 const SIGN_TTL_SECONDS = 24 * 60 * 60; // private files stay reachable 24h
 
+// ---- backend selection ----
+const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || '';
+const BLOB = !!BLOB_TOKEN;
+const blob = () => require('@vercel/blob'); // lazy: local runs never load it
+const keyOf = (relPath) => String(relPath).replace(/^\/uploads\//, 'uploads/');
+
 function ensureDirs() {
+  if (BLOB) return; // nothing to create in the cloud
   fs.mkdirSync(PUBLIC_DIR, { recursive: true });
   fs.mkdirSync(PRIVATE_DIR, { recursive: true });
 }
@@ -42,6 +58,33 @@ function randomName(original) {
 
 // multer storage for either tree: makeStorage('public' | 'private')
 function makeStorage(which) {
+  if (BLOB) {
+    // custom engine: multer streams the upload, we buffer it, push it to
+    // Blob, and hand multer the same fields diskStorage would have set
+    // (filename/size/path) so route code keeps working unchanged.
+    return {
+      _handleFile(req, file, cb) {
+        const name = randomName(file.originalname);
+        const key = `uploads/${which}/${name}`;
+        const chunks = [];
+        file.stream.on('data', (c) => chunks.push(c));
+        file.stream.on('error', (e) => cb(e));
+        file.stream.on('end', async () => {
+          try {
+            const buf = Buffer.concat(chunks);
+            await blob().put(key, buf, {
+              access: 'public', token: BLOB_TOKEN, contentType: file.mimetype,
+            });
+            cb(null, { filename: name, size: buf.length, buffer: buf, key });
+          } catch (e) { cb(e); }
+        });
+      },
+      _removeFile(req, file, cb) {
+        if (!file.key) return cb(null);
+        blob().del(file.key, { token: BLOB_TOKEN }).then(() => cb(null), cb);
+      },
+    };
+  }
   const dir = which === 'public' ? PUBLIC_DIR : PRIVATE_DIR;
   return multer.diskStorage({
     destination: (req, file, cb) => cb(null, dir),
@@ -78,6 +121,32 @@ function verifySignedUpload(req, res, next) {
   next();
 }
 
+// ---------- cloud serving (Blob backend) ----------
+// public files: redirect to the store's public URL (published content)
+async function servePublicUpload(req, res) {
+  const key = `uploads/public${req.path}`;
+  try {
+    const meta = await blob().head(key, { token: BLOB_TOKEN });
+    res.redirect(302, meta.url);
+  } catch { res.status(404).json({ error: 'File not found' }); }
+}
+
+// private files: signature already verified — PROXY the bytes so the
+// store URL is never handed to the browser
+async function servePrivateUpload(req, res) {
+  const key = `uploads/private${req.path}`;
+  try {
+    const meta = await blob().head(key, { token: BLOB_TOKEN });
+    const r = await fetch(meta.url);
+    if (!r.ok || !r.body) return res.status(404).json({ error: 'File not found' });
+    res.setHeader('Content-Type', meta.contentType || 'application/octet-stream');
+    if (meta.contentLength) res.setHeader('Content-Length', meta.contentLength);
+    res.setHeader('Cache-Control', 'private, max-age=86400'); // matches the 24h signature
+    const { Readable } = require('stream');
+    Readable.fromWeb(r.body).pipe(res);
+  } catch { res.status(404).json({ error: 'File not found' }); }
+}
+
 // ---- file housekeeping ----
 function resolveUpload(relPath) {
   if (!relPath || !relPath.startsWith('/uploads/')) return null;
@@ -90,13 +159,28 @@ function resolveUpload(relPath) {
   return file;
 }
 
-function deleteUpload(relPath) {
-  const file = resolveUpload(relPath);
-  if (!file) return;
-  try { fs.unlinkSync(file); } catch { /* already gone */ }
+async function deleteUpload(relPath) {
+  try {
+    if (BLOB) {
+      if (!relPath || !relPath.startsWith('/uploads/')) return;
+      await blob().del(keyOf(relPath), { token: BLOB_TOKEN });
+      return;
+    }
+    const file = resolveUpload(relPath);
+    if (!file) return;
+    fs.unlinkSync(file);
+  } catch { /* already gone */ }
 }
 
-function copyToPublic(relPath) {
+async function copyToPublic(relPath) {
+  if (BLOB) {
+    if (!relPath || !relPath.startsWith('/uploads/private/')) throw new Error('Source file missing');
+    const name = `copy-${randomName(path.extname(relPath))}`;
+    await blob().copy(keyOf(relPath), `uploads/public/${name}`, {
+      access: 'public', token: BLOB_TOKEN,
+    });
+    return `/uploads/public/${name}`;
+  }
   const src = resolveUpload(relPath);
   if (!src || !fs.existsSync(src)) throw new Error('Source file missing');
   const name = `copy-${randomName(path.extname(relPath))}`;
@@ -112,20 +196,52 @@ function getSharp() {
   return _sharp;
 }
 
-// 800px webp version for grids/previews; returns '' when sharp is absent
-async function makeThumb(srcAbsPath, label) {
+// 800px webp version for grids/previews; returns '' when sharp is absent.
+// input: a local absolute path, or a Buffer (cloud backend).
+async function makeThumb(input, label) {
   const sharp = getSharp();
   if (!sharp) return '';
   const name = `thumb-${randomName(label)}.webp`;
-  await sharp(srcAbsPath).rotate() // honor EXIF orientation (phone photos)
+  const pipeline = sharp(input).rotate() // honor EXIF orientation (phone photos)
     .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
-    .webp({ quality: 80 })
-    .toFile(path.join(PRIVATE_DIR, name));
+    .webp({ quality: 80 });
+  if (BLOB) {
+    const buf = await pipeline.toBuffer();
+    await blob().put(`uploads/private/${name}`, buf, {
+      access: 'public', token: BLOB_TOKEN, contentType: 'image/webp',
+    });
+    return `/uploads/private/${name}`;
+  }
+  await pipeline.toFile(path.join(PRIVATE_DIR, name));
   return `/uploads/private/${name}`;
 }
 
+// copy every stored file into a local folder (Google Drive backup staging).
+// local backend: plain recursive copy. Blob backend: list + download.
+async function stageUploadsTo(destDir) {
+  if (!BLOB) {
+    if (fs.existsSync(UPLOAD_ROOT)) fs.cpSync(UPLOAD_ROOT, destDir, { recursive: true });
+    return;
+  }
+  const { list } = blob();
+  let cursor;
+  do {
+    const page = await list({ prefix: 'uploads/', token: BLOB_TOKEN, cursor });
+    for (const b of page.blobs) {
+      // b.pathname = 'uploads/public/x.png' → destDir/public/x.png
+      const rel = b.pathname.replace(/^uploads\//, '');
+      const dest = path.join(destDir, rel);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      const r = await fetch(b.url);
+      fs.writeFileSync(dest, Buffer.from(await r.arrayBuffer()));
+    }
+    cursor = page.cursor;
+  } while (cursor);
+}
+
 // ---- one-time move of legacy files (flat uploads/ → public/ | private/) ----
-function migrateLegacyUploads(db) {
+async function migrateLegacyUploads(db) {
+  if (BLOB) return; // cloud store never had flat legacy files
   ensureDirs();
   let moved = 0;
   const upd = (table, col) => db.prepare(`UPDATE ${table} SET ${col} = ? WHERE ${col} = ?`);
@@ -143,25 +259,27 @@ function migrateLegacyUploads(db) {
       return prefix + name;
     } catch { return rel; }
   };
-  const migrate = (table, col, dir) => {
+  const migrate = async (table, col, dir) => {
     const statement = upd(table, col);
-    db.prepare(`SELECT ${col} AS p FROM ${table} WHERE ${col} LIKE '/uploads/%'`)
-      .all().forEach((row) => {
-        const next = moveOne(row.p, dir);
-        if (next !== row.p) statement.run(next, row.p);
-      });
+    const rows = await db.prepare(`SELECT ${col} AS p FROM ${table} WHERE ${col} LIKE '/uploads/%'`).all();
+    for (const row of rows) {
+      const next = moveOne(row.p, dir);
+      if (next !== row.p) await statement.run(next, row.p);
+    }
   };
-  migrate('posts', 'image', PUBLIC_DIR);          // published → public
-  migrate('album_media', 'file_path', PRIVATE_DIR); // albums → private
-  migrate('album_media', 'thumb_path', PRIVATE_DIR);
-  migrate('messages', 'attachment', PRIVATE_DIR);   // chat → private
+  await migrate('posts', 'image', PUBLIC_DIR);          // published → public
+  await migrate('album_media', 'file_path', PRIVATE_DIR); // albums → private
+  await migrate('album_media', 'thumb_path', PRIVATE_DIR);
+  await migrate('messages', 'attachment', PRIVATE_DIR);   // chat → private
   if (moved) console.log(`Media storage: moved ${moved} legacy file(s) into uploads/public|private.`);
 }
 
 module.exports = {
-  UPLOAD_ROOT, PUBLIC_DIR, PRIVATE_DIR,
+  UPLOAD_ROOT, PUBLIC_DIR, PRIVATE_DIR, BLOB,
   ensureDirs, makeStorage,
   signPath, verifySignedUpload,
+  servePublicUpload, servePrivateUpload,
   deleteUpload, copyToPublic, makeThumb,
+  stageUploadsTo,
   migrateLegacyUploads,
 };

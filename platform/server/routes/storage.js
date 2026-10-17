@@ -43,4 +43,27 @@ router.post('/months/:month/clear', authenticate, async (req, res) => {
   }
 });
 
+// GET /api/storage/cron-sync — Vercel Cron (Hobby: daily schedule; the
+// handler itself skips unless the current month has no successful push yet,
+// so the backup runs once a month). Guarded by CRON_SECRET — Vercel sends it
+// as `Authorization: Bearer <CRON_SECRET>` on every cron request.
+router.get('/cron-sync', async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers.authorization !== `Bearer ${secret}`) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  try {
+    const month = drive.monthOf();
+    const lastAt = (await db.prepare("SELECT value FROM settings WHERE key = 'drive_last_sync_at'").get())?.value || '';
+    const lastOk = (await db.prepare("SELECT value FROM settings WHERE key = 'drive_last_sync_ok'").get())?.value === '1';
+    if (lastOk && lastAt.slice(0, 7) === month) {
+      return res.json({ skipped: true, month, reason: 'already backed up this month' });
+    }
+    const st = await drive.syncNow(null); // no user → no notification spam
+    res.json({ synced: true, month, alert: st.alert });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "platform/server/index.js", "use": "@vercel/node" },
+    {
+      "src": "platform/client/package.json",
+      "use": "@vercel/static-build",
+      "config": { "distDir": "dist" }
+    }
+  ],
+  "functions": {
+    "platform/server/index.js": { "maxDuration": 60 }
+  },
+  "routes": [
+    { "src": "/socket.io/(.*)", "dest": "/platform/server/index.js" },
+    { "src": "/api/(.*)", "dest": "/platform/server/index.js" },
+    { "src": "/uploads/(.*)", "dest": "/platform/server/index.js" },
+    { "src": "/assets/(.*)", "dest": "/platform/client/assets/$1" },
+    { "src": "/favicon.ico", "dest": "/platform/client/favicon.ico" },
+    { "src": "/(.*)", "dest": "/platform/client/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/storage/cron-sync", "schedule": "0 3 * * *" }
+  ]
+}

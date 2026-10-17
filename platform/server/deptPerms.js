@@ -21,8 +21,8 @@ function canViewDept(user, deptId) {
   return user.department_id === deptId;
 }
 
-function getDept(slug) {
-  return db.prepare('SELECT * FROM departments WHERE slug = ?').get(slug);
+async function getDept(slug) {
+  return await db.prepare('SELECT * FROM departments WHERE slug = ?').get(slug);
 }
 
 module.exports = { isLeader, canManageDept, canViewDept, getDept };

@@ -111,12 +111,12 @@ Materials inventory & loans · video meetings (Jitsi test) · email/Telegram ale
 | Layer | Choice |
 |-------|--------|
 | Frontend | React 19 + Vite (light theme — engineering brand), react-router-dom |
-| Backend | Node.js + Express |
-| Database | SQLite (better-sqlite3) → PostgreSQL in PROD |
-| Real-time | Socket.io (wired, used from Sprint 4) |
+| Backend | Node.js + Express 5 |
+| Database | SQLite via **@libsql/client** — same code on a local file (`file:club.db`) or **Turso** online (`TURSO_URL` + `TURSO_AUTH_TOKEN`) |
+| Real-time | Socket.io (in-memory adapter locally; Redis adapter + Upstash on Vercel) |
 | Auth | JWT + bcryptjs |
-| Uploads (Sprint 2+, reworked 2026-10-15) | multer → `uploads/public` (feed images, guest-viewable) + `uploads/private` (album photos & chat attachments, 24h HMAC-signed URLs) · `sharp` thumbnails |
-| Backups (2026-10-16) | `npm run backup` → local `platform/backups/` · `npm run sync-drive` → monthly snapshot on **Google Drive** via rclone (`<remote>/YYYY-MM`) · Storage page `/storage` with quota-limit alerts (amber ≥80%, red ≥95%) |
+| Uploads (Sprint 2+, reworked 2026-10-15) | multer → local `uploads/public`+`uploads/private`, or **Vercel Blob** on the hosted build (`BLOB_READ_WRITE_TOKEN`) · feed images guest-viewable · album photos & chat attachments behind 24h HMAC-signed URLs · `sharp` thumbnails · client re-encodes images >3.5 MB (max 2048 px WebP) |
+| Backups (2026-10-16) | `npm run backup` → local `platform/backups/` · monthly snapshot on **Google Drive** — rclone locally, pure-Node Drive REST on Vercel (`driveClient.js`, service account or `drive-auth.js` refresh token) · daily Vercel Cron runs it once a month · Storage page `/storage` with quota-limit alerts (amber ≥80%, red ≥95%) |
 | Video (test) | Jitsi embedded iframe |
 | Toolchain | MiKTeX for the report PDF |
 
@@ -165,12 +165,49 @@ Open **http://localhost:5173** — database and demo accounts are created automa
 
 **Production env (all optional):** `ISIGK_DEMO_ACCOUNTS=0` → *no demo accounts/content are seeded* (real install: only the 5 departments; the Professor registers himself on `/signup`, then builds the club) · `DB_PATH` → where `club.db` lives (default: `platform/server/club.db` — point it at your persistent disk) · `PORT` · `JWT_SECRET` → set a long random string.
 
-### 🚀 Deploy on a host (production)
+### ☁️ Hosted club — Vercel (recommended: works everywhere, no PC to keep on)
+
+The site is a single Vercel project: the Express API (with Socket.io) as a serverless
+function + the built React client as static files. One-time setup (~15 minutes):
+
+1. **Import the repo** on vercel.com → *Add New → Project* → `med-tlili/robotic_club`
+   (the root `vercel.json` already knows how to build both halves).
+2. **Databases & stores** (Vercel Marketplace → each installs into the project):
+   * **Turso** (hosted SQLite) → sets `TURSO_URL` + `TURSO_AUTH_TOKEN`
+   * **Vercel Blob** → sets `BLOB_READ_WRITE_TOKEN` (all uploads land there)
+   * **Upstash Redis** → sets `REDIS_URL` (live chat across server instances)
+3. **Environment variables** (Project → Settings → Environment Variables):
+
+   | Variable | Value |
+   |----------|-------|
+   | `ISIGK_DEMO_ACCOUNTS` | `0` (no public demo accounts on the real club) |
+   | `JWT_SECRET` | a long random string |
+   | `CRON_SECRET` | another long random string (guards the backup cron) |
+   | `ISIGK_DRIVE_SA_JSON` *or* `ISIGK_DRIVE_CLIENT_ID`+`ISIGK_DRIVE_CLIENT_SECRET`+`ISIGK_DRIVE_REFRESH_TOKEN` | Google Drive backups — see below |
+
+4. **Deploy** → open the URL → **`/signup`** creates the Professor → the Leader and
+   the rest of the club follow (same chain as self-hosting).
+
+**Drive backups on Vercel** (rclone can't run there — the API talks to Drive directly):
+create a Google Cloud project → enable the **Drive API** → either a *service account*
+key (share your `ISIGK-Club-Backups` folder with its email, paste the JSON as
+`ISIGK_DRIVE_SA_JSON`) **or** an OAuth *Desktop app* client — then run
+`cd platform/server && node drive-auth.js` once locally, paste the printed refresh
+token into the env vars. The Storage page's setup panel shows the same steps.
+A daily Vercel Cron checks "is this month backed up yet?" and runs the push once
+a month (Hobby plans allow daily crons only — the handler skips the other days).
+
+Notes: uploads over ~4.5 MB are rejected by Vercel (the app re-encodes large images
+automatically; keep videos small) · live chat works through the Redis adapter ·
+the hosted database is backed up to Drive monthly; everything is restoreable from
+`club-export.json` + the uploads tree.
+
+### 🖥️ Self-host (own machine or school server)
 
 ```bash
 git clone https://github.com/med-tlili/robotic_club.git
 cd robotic_club/platform/server
-npm install        # API dependencies (better-sqlite3 & sharp ship Linux prebuilds)
+npm install        # API dependencies (libsql + sharp ship prebuilds)
 npm start          # production mode: no demo data, JWT secret generated once → .jwt-secret
 ```
 
@@ -248,6 +285,16 @@ These accounts exist **only** in the demo seed (`ISIGK_DEMO_ACCOUNTS` unset). Pr
 ---
 
 ## 17. 📜 Decisions log
+
+**2026-10-17 — HOSTING PIVOT: Vercel (online) replaces the LAN/PC server — one codebase, two backends (user: "i want the site online on vercel")**
+- Cloudflare ruled out (no Express/Socket.io on Workers); **Vercel** chosen — Express runs as a serverless function, Socket.io works on all plans (Hobby caps a WS at 300s — engine.io auto-reconnects and every handler is reconnect-safe). `vercel.json` builds the server function + the static client, routes API/socket/uploads to Express, everything else to the SPA, and registers the backup cron
+- **Database: @libsql/client everywhere** — the exact same code runs on `file:club.db` (self-host/dev, unchanged behavior) or **Turso** online (`TURSO_URL`+`TURSO_AUTH_TOKEN`). better-sqlite3 left the runtime (kept as a devDependency only for the local regression scripts). The whole server went **async** (168 await sites — codemod + hand fixes, `node --check` fail-fast for missed async signatures); `db.js` keeps the same facade (`prepare().get/.all/.run`, `exec`) now Promise-based behind a `ready` gate, plus `backup()` (VACUUM INTO, local) and `exportSnapshot()` (JSON dump of every table, the Turso build's snapshot format). Bind quirk fixed centrally: `NaN`/`undefined` → NULL (old better-sqlite3 semantics; libsql threw RangeError). New JSON error handler — API failures never come back as HTML
+- **Uploads: Vercel Blob backend in `storage.js`** (auto-selected when `BLOB_READ_WRITE_TOKEN` is set) — same random names, same HMAC-signed URL API, zero route changes (custom multer engine keeps `req.file.filename`). Public files redirect to the store; **private files are proxied** after the signature check so the store URL never reaches the browser. Client now re-encodes images >3.5 MB in the browser (max 2048 px, WebP) so phone photos fit Vercel's 4.5 MB body cap — hosted video uploads must stay under it
+- **Chat across instances**: `@socket.io/redis-adapter` + Upstash (`REDIS_URL`) — events reach sockets connected to other function instances; without the env the in-memory adapter is used (local/single-instance)
+- **Drive backups on Vercel**: rclone can't run there → `driveClient.js`, a pure-Node Drive REST client — service account (`ISIGK_DRIVE_SA_JSON`) or OAuth refresh token (`node drive-auth.js` prints the consent link and exchanges the code once). Same monthly `ISIGK-Club-Backups/YYYY-MM` layout; the cloud DB snapshot goes up as `club-export.json` instead of club.db. Local rclone path untouched (still the default without creds). Vercel Hobby allows daily crons only → `GET /api/storage/cron-sync` (guarded by `CRON_SECRET`) runs the push once a month and skips the other days
+- **Entry point**: `module.exports = readyApp` — Vercel needs the handler synchronously; it simply holds each request until schema+seed are done (local boot still uses `server.listen`)
+- **Verified locally on the same code (file backend + fake rclone remote): 173/173** across five suites — api_smoke 79 (every route family, every role's permissions, uploads, reports, PDF, socket handshake) · media 30 (upload → thumb → signed URLs → share-to-feed → delete, signature tampering/expiry) · storage 25 (sync/re-sync/clear/quota/alerts) · account_chain 25 · professor_signup 14 · `vite build` clean
+- Trade-offs accepted: hosted uploads capped at ~4.5 MB per file; Hobby WS capped at 300s (silent auto-reconnect); Drive push re-uploads the month's files monthly (simple and self-healing); restore from `club-export.json` is a manual script (documented in the panel/README)
 
 **2026-10-17 — MEMBER ACCESS MODE: the Professor's PC IS the server (no cloud hosting)**
 - Decision: no web host — the club laptop runs `START-SERVER.bat` (double-click → dependency check → `npm start`) and members open `http://<LAN-IP>:4000` from their own PCs/phones on the same WiFi

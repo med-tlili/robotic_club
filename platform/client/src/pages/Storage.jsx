@@ -86,24 +86,47 @@ export default function Storage() {
 
       {st.setupRequired ? (
         <Panel title="One-time setup" icon={HardDrive}>
-          <p className="text-dim" style={{ margin: '0 0 6px' }}>
-            Backups go to Google Drive through <code>rclone</code>. {!st.rcloneInstalled && 'Right now rclone is not installed.'}
-            {st.rcloneInstalled && !st.remoteConfigured && ' rclone is installed but no Drive account is linked yet.'}
-          </p>
-          <ol className="setup-steps">
-            <li>Create a <strong>fresh Google account</strong> for the club (its whole 15&nbsp;GB then belongs to backups).</li>
-            <li>Install rclone: <code className="code-line">winget install Rclone.Rclone</code></li>
-            <li>Link the account once:
-              <code className="code-line">rclone config create gdrive drive scope=drive</code>
-              <code className="code-line">rclone about gdrive:</code>
-              (a browser opens — sign in to the new account and press Allow)
-            </li>
-            <li>Reload this page and press <strong>Run backup now</strong>.</li>
-          </ol>
-          <p className="text-faint text-xs" style={{ marginTop: 12 }}>
-            Optional — automatic monthly backup (1st of the month, 02:00):
-            <code className="code-line">schtasks /create /tn "ISIGK Drive backup" /sc monthly /d 1 /st 02:00 /tr "cmd /c cd C:\Users\USER\Desktop\club_robotic\platform\server &amp;&amp; npm run sync-drive"</code>
-          </p>
+          {st.backend === 'cloud' ? (
+            <>
+              <p className="text-dim" style={{ margin: '0 0 6px' }}>
+                Backups go to Google Drive through the Drive API — the project needs its
+                Google credentials as environment variables (this server cannot run rclone).
+              </p>
+              <ol className="setup-steps">
+                <li>One Google Cloud project with the <strong>Drive API enabled</strong>.</li>
+                <li>Either a <strong>service account</strong> key (share the backup folder
+                  with its email), or an OAuth client + one authorization
+                  (<code className="code-line">node drive-auth.js</code> prints both).</li>
+                <li>Set the environment variables on the host:
+                  <code className="code-line">ISIGK_DRIVE_SA_JSON=…</code>
+                  <span className="text-faint"> — or — </span>
+                  <code className="code-line">ISIGK_DRIVE_CLIENT_ID=… / ISIGK_DRIVE_CLIENT_SECRET=… / ISIGK_DRIVE_REFRESH_TOKEN=…</code>
+                </li>
+                <li>Reload this page and press <strong>Run backup now</strong>.</li>
+              </ol>
+            </>
+          ) : (
+            <>
+              <p className="text-dim" style={{ margin: '0 0 6px' }}>
+                Backups go to Google Drive through <code>rclone</code>. {!st.rcloneInstalled && 'Right now rclone is not installed.'}
+                {st.rcloneInstalled && !st.remoteConfigured && ' rclone is installed but no Drive account is linked yet.'}
+              </p>
+              <ol className="setup-steps">
+                <li>Create a <strong>fresh Google account</strong> for the club (its whole 15&nbsp;GB then belongs to backups).</li>
+                <li>Install rclone: <code className="code-line">winget install Rclone.Rclone</code></li>
+                <li>Link the account once:
+                  <code className="code-line">rclone config create gdrive drive scope=drive</code>
+                  <code className="code-line">rclone about gdrive:</code>
+                  (a browser opens — sign in to the new account and press Allow)
+                </li>
+                <li>Reload this page and press <strong>Run backup now</strong>.</li>
+              </ol>
+              <p className="text-faint text-xs" style={{ marginTop: 12 }}>
+                Optional — automatic monthly backup (1st of the month, 02:00):
+                <code className="code-line">schtasks /create /tn "ISIGK Drive backup" /sc monthly /d 1 /st 02:00 /tr "cmd /c cd C:\Users\USER\Desktop\club_robotic\platform\server &amp;&amp; npm run sync-drive"</code>
+              </p>
+            </>
+          )}
         </Panel>
       ) : (
         <>

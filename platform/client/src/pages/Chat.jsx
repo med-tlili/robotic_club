@@ -7,6 +7,7 @@ import {
 import { useAuth } from '../auth';
 import { api, getToken, BASE } from '../api';
 import { DEPT_LABELS, ROLE_LABELS } from '../roles';
+import { shrinkImage } from '../compress';
 import { EmptyState, Skeleton, Avatar } from '../components/ui';
 import { connectSocket, getSocket } from '../socket';
 
@@ -206,7 +207,7 @@ function Conversation({ roomKey, user, onActivity, onBack }) {
         const fd = new FormData();
         fd.append('room', roomKey);
         fd.append('body', text.trim());
-        fd.append('attachment', file);
+        fd.append('attachment', await shrinkImage(file));
         const res = await fetch(`${BASE}/api/chat/messages`, {
           method: 'POST',
           headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},

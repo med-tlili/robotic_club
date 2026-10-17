@@ -10,11 +10,11 @@ const { authenticate } = require('../middleware/auth');
 const router = express.Router();
 
 // GET /api/users — club directory (guests: 403)
-router.get('/', authenticate, (req, res) => {
+router.get('/', authenticate, async (req, res) => {
   if (req.user.role === 'guest') {
     return res.status(403).json({ error: 'Guests cannot see the members directory' });
   }
-  const users = db.prepare(`
+  const users = await db.prepare(`
     SELECT u.id, u.full_name, u.role, u.bio, u.department_id, d.name AS department_name, d.slug AS department_slug
     FROM users u LEFT JOIN departments d ON d.id = u.department_id
     ORDER BY u.full_name
@@ -23,11 +23,11 @@ router.get('/', authenticate, (req, res) => {
 });
 
 // GET /api/users/:id — profile of one member (for chat header)
-router.get('/:id', authenticate, (req, res) => {
+router.get('/:id', authenticate, async (req, res) => {
   if (req.user.role === 'guest') {
     return res.status(403).json({ error: 'Guests cannot see member profiles' });
   }
-  const user = db.prepare(`
+  const user = await db.prepare(`
     SELECT u.id, u.full_name, u.role, u.bio, u.department_id, d.name AS department_name, d.slug AS department_slug
     FROM users u LEFT JOIN departments d ON d.id = u.department_id WHERE u.id = ?
   `).get(req.params.id);
@@ -45,11 +45,11 @@ router.get('/:id', authenticate, (req, res) => {
 // ============================================================
 
 // PATCH /api/users/:id/role  — body { role, department_id? }
-router.patch('/:id/role', authenticate, (req, res) => {
+router.patch('/:id/role', authenticate, async (req, res) => {
   if (!['leader', 'coleader'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Only the Leader and Co-Leader can manage members' });
   }
-  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  const target = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
   if (!target) return res.status(404).json({ error: 'User not found' });
 
   const { role, department_id } = req.body || {};
@@ -66,12 +66,12 @@ router.patch('/:id/role', authenticate, (req, res) => {
 
   let dept = null;
   if (role !== 'guest') {
-    dept = db.prepare('SELECT * FROM departments WHERE id = ?').get(Number(department_id));
+    dept = await db.prepare('SELECT * FROM departments WHERE id = ?').get(Number(department_id));
     if (!dept || dept.slug === 'materials') {
       return res.status(400).json({ error: 'A valid department is required for members and managers' });
     }
   }
-  db.prepare('UPDATE users SET role = ?, department_id = ? WHERE id = ?')
+  await db.prepare('UPDATE users SET role = ?, department_id = ? WHERE id = ?')
     .run(role, dept ? dept.id : null, target.id);
   res.json({ ok: true, role, department_id: dept ? dept.id : null });
 });
@@ -83,7 +83,7 @@ router.patch('/:id/role', authenticate, (req, res) => {
 //     member, guest)
 //   everyone else → 403. There is NO self-registration.
 // ============================================================
-router.post('/', authenticate, (req, res) => {
+router.post('/', authenticate, async (req, res) => {
   const actor = req.user.role;
   let allowed;
   if (actor === 'professor') {
@@ -112,19 +112,19 @@ router.post('/', authenticate, (req, res) => {
   if (name.length < 2) return res.status(400).json({ error: 'Full name is required' });
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) return res.status(400).json({ error: 'A valid email is required' });
   if (pwd.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
-  if (db.prepare('SELECT id FROM users WHERE email = ?').get(mail)) {
+  if (await db.prepare('SELECT id FROM users WHERE email = ?').get(mail)) {
     return res.status(409).json({ error: 'An account with this email already exists' });
   }
 
   // same department rule as role changes: required for member & manager
   let dept = null;
   if (role === 'member' || role === 'manager') {
-    dept = db.prepare('SELECT * FROM departments WHERE id = ?').get(Number(department_id));
+    dept = await db.prepare('SELECT * FROM departments WHERE id = ?').get(Number(department_id));
     if (!dept || dept.slug === 'materials') {
       return res.status(400).json({ error: 'A valid department is required for members and managers' });
     }
   }
-  const info = db.prepare(
+  const info = await db.prepare(
     'INSERT INTO users (email, password_hash, full_name, role, department_id) VALUES (?,?,?,?,?)',
   ).run(mail, bcrypt.hashSync(pwd, 10), name, role, dept ? dept.id : null);
   res.status(201).json({
@@ -134,11 +134,11 @@ router.post('/', authenticate, (req, res) => {
 });
 
 // DELETE /api/users/:id — remove a member from the club
-router.delete('/:id', authenticate, (req, res) => {
+router.delete('/:id', authenticate, async (req, res) => {
   if (!['leader', 'coleader'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Only the Leader and Co-Leader can remove members' });
   }
-  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  const target = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
   if (!target) return res.status(404).json({ error: 'User not found' });
   if (target.id === req.user.id) {
     return res.status(400).json({ error: 'You cannot remove yourself' });
@@ -146,9 +146,9 @@ router.delete('/:id', authenticate, (req, res) => {
   if (['leader', 'coleader', 'professor'].includes(target.role)) {
     return res.status(403).json({ error: 'Leaders, Co-Leaders and the Professor cannot be removed' });
   }
-  db.prepare('DELETE FROM votes WHERE user_id = ?').run(target.id); // their votes go away
+  await db.prepare('DELETE FROM votes WHERE user_id = ?').run(target.id); // their votes go away
   try {
-    db.prepare('DELETE FROM users WHERE id = ?').run(target.id);
+    await db.prepare('DELETE FROM users WHERE id = ?').run(target.id);
   } catch {
     // author_id / created_by FKs: member has authored posts/comments/events
     return res.status(409).json({

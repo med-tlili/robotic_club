@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../auth';
 import { api, BASE } from '../api';
+import { shrinkImage } from '../compress';
 import { ToolBlock, Skeleton, Avatar } from './ui';
 
 const isBoss = (role) => ['leader', 'coleader'].includes(role);
@@ -374,7 +375,7 @@ function AlbumUpload({ albumId, onDone }) {
     setBusy(true); setError('');
     try {
       const fd = new FormData();
-      fd.append('file', file);
+      fd.append('file', await shrinkImage(file));
       fd.append('caption', caption);
       const token = localStorage.getItem('token');
       const res = await fetch(`${BASE}/api/media/albums/${albumId}/media`, {

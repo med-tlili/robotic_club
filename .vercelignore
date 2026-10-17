@@ -1,0 +1,16 @@
+# Kept out of the deployment upload (git integration only sends tracked
+# files anyway — this covers CLI deploys from the repo root).
+src/
+work/
+layers/
+robotics_club_video/
+rapport/
+backups/
+platform/backups/
+platform/server/uploads/
+platform/server/club.db*
+platform/server/node_modules/
+platform/client/node_modules/
+*.mp4
+*.mp3
+*.pptx

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../auth';
 import { api, getToken, BASE } from '../api';
+import { shrinkImage } from '../compress';
 import { Avatar, EmptyState, Skeleton, RolePill } from './ui';
 
 const TYPE_META = {
@@ -274,7 +275,7 @@ function Composer({ dept, onDone, onCancel }) {
       fd.append('title', title);
       fd.append('body', body);
       fd.append('type', type);
-      if (image) fd.append('image', image);
+      if (image) fd.append('image', await shrinkImage(image));
       const res = await fetch(`${BASE}/api/posts`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${getToken()}` },

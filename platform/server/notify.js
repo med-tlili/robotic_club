@@ -12,20 +12,27 @@ function setIO(io) {
 }
 
 // notify(userId, { type, title, body, link })
-function notify(userId, { type, title, body = '', link = '' }) {
+// never rejects — a notification failure must not break the caller's response
+async function notify(userId, { type, title, body = '', link = '' }) {
   if (!userId || !title) return;
-  const info = db.prepare(
-    'INSERT INTO notifications (user_id, type, title, body, link) VALUES (?,?,?,?,?)'
-  ).run(userId, type, title, body, link);
-  const row = db.prepare('SELECT * FROM notifications WHERE id = ?').get(info.lastInsertRowid);
-  if (ioRef) ioRef.to(`user:${userId}`).emit('notification', row);
+  try {
+    const info = await db.prepare(
+      'INSERT INTO notifications (user_id, type, title, body, link) VALUES (?,?,?,?,?)'
+    ).run(userId, type, title, body, link);
+    const row = await db.prepare('SELECT * FROM notifications WHERE id = ?').get(info.lastInsertRowid);
+    if (ioRef) ioRef.to(`user:${userId}`).emit('notification', row);
+  } catch (e) {
+    console.error('[notify]', e.message);
+  }
 }
 
 // notifyMany([userId, ...], payload) — no duplicates, skips the actor
-function notifyMany(userIds, payload, actorId = null) {
-  [...new Set(userIds)]
-    .filter((id) => id && id !== actorId)
-    .forEach((id) => notify(id, payload));
+async function notifyMany(userIds, payload, actorId = null) {
+  await Promise.all(
+    [...new Set(userIds)]
+      .filter((id) => id && id !== actorId)
+      .map((id) => notify(id, payload))
+  );
 }
 
 module.exports = { setIO, notify, notifyMany };

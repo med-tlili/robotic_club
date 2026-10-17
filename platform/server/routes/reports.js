@@ -46,91 +46,91 @@ function periodRange(query) {
 }
 
 // ---------- aggregation ----------
-function buildReport(query) {
+async function buildReport(query) {
   const { year, month, label, start, end } = periodRange(query);
   const deptId = Number(query.department_id) || null;
-  const dept = deptId ? db.prepare('SELECT id, name, slug FROM departments WHERE id = ?').get(deptId) : null;
+  const dept = deptId ? await db.prepare('SELECT id, name, slug FROM departments WHERE id = ?').get(deptId) : null;
 
   // SQL fragment: restrict to one department when requested
   const inDept = (col) => (deptId ? `${col} = ${deptId}` : '1=1');
 
-  const one = (sql, ...p) => db.prepare(sql).get(...p);
-  const all = (sql, ...p) => db.prepare(sql).all(...p);
+  const one = async (sql, ...p) => await db.prepare(sql).get(...p);
+  const all = async (sql, ...p) => await db.prepare(sql).all(...p);
 
   // members
-  const membersTotal = one('SELECT COUNT(*) c FROM users WHERE role != \'guest\'').c;
+  const membersTotal = (await one('SELECT COUNT(*) c FROM users WHERE role != \'guest\'')).c;
   const membersInDept = deptId
-    ? one("SELECT COUNT(*) c FROM users WHERE role != 'guest' AND department_id = ?", deptId).c
+    ? (await one("SELECT COUNT(*) c FROM users WHERE role != 'guest' AND department_id = ?", deptId)).c
     : membersTotal;
-  const membersByRole = all(
+  const membersByRole = await all(
     `SELECT role, COUNT(*) c FROM users WHERE role != 'guest' ${deptId ? 'AND department_id = ?' : ''} GROUP BY role`,
     ...(deptId ? [deptId] : []),
   );
-  const newMembers = one(
+  const newMembers = (await one(
     `SELECT COUNT(*) c FROM users WHERE role != 'guest' AND created_at >= ? AND created_at < ? ${deptId ? 'AND department_id = ?' : ''}`,
     start, end, ...(deptId ? [deptId] : []),
-  ).c;
+  )).c;
 
   // posts + engagement
-  const posts = one(
+  const posts = (await one(
     `SELECT COUNT(*) c FROM posts WHERE ${inDept('department_id')} AND created_at >= ? AND created_at < ?`,
     start, end,
-  ).c;
-  const postsByType = all(
+  )).c;
+  const postsByType = await all(
     `SELECT type, COUNT(*) c FROM posts WHERE ${inDept('department_id')} AND created_at >= ? AND created_at < ? GROUP BY type`,
     start, end,
   );
-  const votes = one(
+  const votes = (await one(
     `SELECT COUNT(*) c FROM votes v JOIN posts p ON p.id = v.post_id
      WHERE ${inDept('p.department_id')} AND v.created_at >= ? AND v.created_at < ?`,
     start, end,
-  ).c;
-  const comments = one(
+  )).c;
+  const comments = (await one(
     `SELECT COUNT(*) c FROM comments c JOIN posts p ON p.id = c.post_id
      WHERE ${inDept('p.department_id')} AND c.created_at >= ? AND c.created_at < ?`,
     start, end,
-  ).c;
+  )).c;
 
   // events are club-wide (the calendar is owned by the Leader, not per-department)
-  const events = one(
+  const events = (await one(
     'SELECT COUNT(*) c FROM events WHERE event_date >= ? AND event_date < ?',
     start, end,
-  ).c;
+  )).c;
 
   // tasks
-  const tasksTotal = one(
+  const tasksTotal = (await one(
     `SELECT COUNT(*) c FROM tasks WHERE ${inDept('department_id')} AND created_at >= ? AND created_at < ?`,
     start, end,
-  ).c;
-  const tasksDone = one(
+  )).c;
+  const tasksDone = (await one(
     `SELECT COUNT(*) c FROM tasks WHERE ${inDept('department_id')} AND status = 'done'
      AND created_at >= ? AND created_at < ?`,
     start, end,
-  ).c;
+  )).c;
 
   // applications
-  const appsTotal = one(
+  const appsTotal = (await one(
     `SELECT COUNT(*) c FROM applications WHERE ${inDept('department_id')} AND created_at >= ? AND created_at < ?`,
     start, end,
-  ).c;
-  const appsAccepted = one(
+  )).c;
+  const appsAccepted = (await one(
     `SELECT COUNT(*) c FROM applications WHERE ${inDept('department_id')} AND status = 'accepted'
      AND created_at >= ? AND created_at < ?`,
     start, end,
-  ).c;
-  const appsRefused = one(
+  )).c;
+  const appsRefused = (await one(
     `SELECT COUNT(*) c FROM applications WHERE ${inDept('department_id')} AND status = 'refused'
      AND created_at >= ? AND created_at < ?`,
     start, end,
-  ).c;
+  )).c;
 
   // chat activity (group scopes; private excluded from the count)
-  const messages = one(
+  const messages = (await one(
     `SELECT COUNT(*) c FROM messages WHERE scope IN ('global','managers','dept')
      ${deptId ? 'AND (department_id = ? OR scope IN (\'global\',\'managers\'))' : ''}
      AND created_at >= ? AND created_at < ?`,
     ...(deptId ? [deptId] : []), start, end,
-  ).c;
+  )).c;
 
   return {
     label,
@@ -148,60 +148,60 @@ function buildReport(query) {
 }
 
 // ---------- GET /api/reports/data — JSON preview ----------
-router.get('/data', authenticate, requireProfessor, (req, res) => {
-  res.json(buildReport(req.query));
+router.get('/data', authenticate, requireProfessor, async (req, res) => {
+  res.json(await buildReport(req.query));
 });
 
 // ---------- GET /api/reports/charts — dashboard graphs (professor) ----------
-router.get('/charts', authenticate, requireProfessor, (req, res) => {
+router.get('/charts', authenticate, requireProfessor, async (req, res) => {
   const now = new Date();
   const year = Number(req.query.year) || now.getUTCFullYear();
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   // posts per month for the chosen year
-  const postsByMonth = MONTHS.map((label, i) => {
+  const postsByMonth = await Promise.all(MONTHS.map(async (label, i) => {
     const mm = String(i + 1).padStart(2, '0');
     const next = i === 11 ? `${year + 1}-01-01` : `${year}-${String(i + 2).padStart(2, '0')}-01`;
-    const c = db.prepare(
+    const c = (await db.prepare(
       'SELECT COUNT(*) c FROM posts WHERE created_at >= ? AND created_at < ?',
-    ).get(`${year}-${mm}-01`, next).c;
+    ).get(`${year}-${mm}-01`, next)).c;
     return { label, value: c };
-  });
-
-  // messages per month (group chat activity)
-  const messagesByMonth = MONTHS.map((label, i) => {
-    const mm = String(i + 1).padStart(2, '0');
-    const next = i === 11 ? `${year + 1}-01-01` : `${year}-${String(i + 2).padStart(2, '0')}-01`;
-    const c = db.prepare(
-      "SELECT COUNT(*) c FROM messages WHERE scope IN ('global','managers','dept') AND created_at >= ? AND created_at < ?",
-    ).get(`${year}-${mm}-01`, next).c;
-    return { label, value: c };
-  });
-
-  const tasksByStatus = ['todo', 'in_progress', 'done'].map((status) => ({
-    label: status.replace('_', ' '),
-    value: db.prepare('SELECT COUNT(*) c FROM tasks WHERE status = ?').get(status).c,
   }));
 
-  const membersByRole = db.prepare(
+  // messages per month (group chat activity)
+  const messagesByMonth = await Promise.all(MONTHS.map(async (label, i) => {
+    const mm = String(i + 1).padStart(2, '0');
+    const next = i === 11 ? `${year + 1}-01-01` : `${year}-${String(i + 2).padStart(2, '0')}-01`;
+    const c = (await db.prepare(
+      "SELECT COUNT(*) c FROM messages WHERE scope IN ('global','managers','dept') AND created_at >= ? AND created_at < ?",
+    ).get(`${year}-${mm}-01`, next)).c;
+    return { label, value: c };
+  }));
+
+  const tasksByStatus = await Promise.all(['todo', 'in_progress', 'done'].map(async (status) => ({
+    label: status.replace('_', ' '),
+    value: (await db.prepare('SELECT COUNT(*) c FROM tasks WHERE status = ?').get(status)).c,
+  })));
+
+  const membersByRole = await db.prepare(
     "SELECT role AS label, COUNT(*) AS value FROM users WHERE role != 'guest' GROUP BY role ORDER BY value DESC",
   ).all();
 
-  const postsByType = db.prepare(
+  const postsByType = await db.prepare(
     'SELECT type AS label, COUNT(*) AS value FROM posts GROUP BY type ORDER BY value DESC',
   ).all();
 
-  const applications = ['accepted', 'refused', 'pending'].map((status) => ({
+  const applications = await Promise.all(['accepted', 'refused', 'pending'].map(async (status) => ({
     label: status,
-    value: db.prepare('SELECT COUNT(*) c FROM applications WHERE status = ?').get(status).c,
-  }));
+    value: (await db.prepare('SELECT COUNT(*) c FROM applications WHERE status = ?').get(status)).c,
+  })));
 
   res.json({ year, postsByMonth, messagesByMonth, tasksByStatus, membersByRole, postsByType, applications });
 });
 
 // ---------- GET /api/reports/pdf — downloadable PDF ----------
-router.get('/pdf', authenticate, requireProfessor, (req, res) => {
-  const r = buildReport(req.query);
+router.get('/pdf', authenticate, requireProfessor, async (req, res) => {
+  const r = await buildReport(req.query);
   const doc = new PDFDocument({ margin: 50, size: 'A4' });
   const filename = `isigk-report-${r.scope.toLowerCase().replace(/\s+/g, '-')}-${r.label.toLowerCase().replace(/\s+/g, '-')}.pdf`;
   res.setHeader('Content-Type', 'application/pdf');
