@@ -1,0 +1,820 @@
+% !TeX program = pdflatex
+% =====================================================================
+%  ISIGK Robotics Club — Management Platform
+%  Technical Project Report (Sprint/Chapter based)
+%  Compile with: pdflatex rapport_robotic_club.tex (run 2x for TOC)
+% =====================================================================
+\documentclass[12pt,a4paper]{report}
+
+% ---------------- Packages ----------------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{caption}
+\usepackage{tikz}
+\usetikzlibrary{shapes,arrows,positioning}
+\usepackage[hidelinks]{hyperref}
+
+\graphicspath{{./figures/}}
+
+% ---------------- Custom commands ----------------
+\newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+\newcommand{\vprio}{\textcolor{red}{\textbf{MVP}}}
+\newcommand{\pprio}{\textcolor{blue}{\textbf{PROD}}}
+\newcommand{\testprio}{\textcolor{orange}{\textbf{TEST}}}
+
+% ---------------- Headers / footers ----------------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small ISIGK Robotics Club — Management Platform}
+\fancyhead[R]{\small \thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\hypersetup{
+    pdftitle={ISIGK Robotics Club Management Platform},
+    pdfauthor={Project Team},
+    colorlinks=true,
+    linkcolor=black!70!blue,
+    urlcolor=black!60!blue
+}
+
+\begin{document}
+
+% =====================================================================
+%  TITLE PAGE
+% =====================================================================
+\begin{titlepage}
+    \centering
+    \vspace*{1cm}
+
+    {\Large \textbf{Institut Supérieur d'Informatique et de Gestion (ISIGK)}\par}
+    \vspace{0.5cm}
+    {\large Department of Computer Science\par}
+
+    \vspace{2cm}
+    {\Huge \textbf{Robotics Club\\[0.2cm] Management Platform}\par}
+    \vspace{1cm}
+    {\Large Technical Project Report\par}
+
+    \vspace{2cm}
+    {\large
+    \begin{tabular}{rl}
+        Project Supervisors : & Pr. [Name] \& [Name] \\
+        Club Leader         : & [Name] \\
+        Co-Leader           : & [Name] \\
+        Development Team    & [Names] \\
+        Academic Year       : & 2026 -- 2027 \\
+    \end{tabular}\par}
+
+    \vfill
+    {\large \today\par}
+\end{titlepage}
+
+% =====================================================================
+%  TABLE OF CONTENTS
+% =====================================================================
+\tableofcontents
+\listoftables
+\listoffigures
+
+\clearpage
+
+% =====================================================================
+%  CHAPTER 1 — GENERAL INTRODUCTION
+% =====================================================================
+\chapter{General Introduction}
+
+\section{Project Overview}
+
+The Robotics Club of ISIGK is a student association whose mission is to promote robotics,
+electronics and innovation among students through workshops, competitions and collaborative
+projects. The club is governed by a well-defined hierarchical organization: one professor
+acting as an external supervisor, one leader and one co-leader directing the strategy, and
+five managers each in charge of a specific department (Human Resources, Events, Media,
+Finance and Materials). Each department contains members, and the club also welcomes guest
+members who are in an observation or trial period.
+
+This project aims to design and develop a \textbf{web-based management platform} that
+digitizes the club's daily operations. The platform provides each actor with a dedicated
+interface adapted to his role and responsibilities: member registry management, event
+organization, internal communication through chat, budget and inventory tracking, media
+publication, and real-time notifications.
+
+The deliverable of this project follows an \textbf{agile, sprint-based approach}: each
+sprint is documented as a chapter of this report, allowing continuous tracking of the
+progress from the initial backlog to the final production-ready product.
+
+\section{Problem Statement}
+
+Despite its dynamic organization, the Robotics Club currently suffers from a fragmented
+and informal management style:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Scattered communication:} exchanges take place in multiple WhatsApp and
+          Telegram groups, mixing administrative, technical and social content. Important
+          information gets lost and guests or new members are often excluded.
+    \item \textbf{No structured information system:} member lists, attendance and
+          department data are stored in personal files (Excel, Word) with no single source
+          of truth and no access control.
+    \item \textbf{Manual event organization:} invitations, RSVP tracking and post-event
+          follow-up are done manually, leading to duplicated effort and low participation
+          visibility.
+    \item \textbf{Untracked resources:} materials, electronic components and tools are
+          borrowed without traceability, causing losses and stock discrepancies.
+    \item \textbf{Opaque finances:} income, expenses and per-department budgets are not
+          visible to the club's supervision, limiting accountability.
+    \item \textbf{No remote collaboration:} there is no integrated solution for video
+          meetings tied to the club's departments and events.
+\end{itemize}
+
+Existing general-purpose tools (WhatsApp, Google Drive, Discord, Notion) each cover only a
+fragment of these needs and do not enforce the club's specific role hierarchy. There is
+therefore a real need for a \textbf{custom platform aligned with the club's organization}.
+
+\section{Project Objectives}
+
+The main objective is to build a single platform that makes it easy for every user to
+manage his role within the club. The specific objectives are:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{O1 -- Role-based access:} implement a strict permission model
+          (Professor, Leader, Co-leader, Manager, Member, Guest) so that each user sees and
+          does exactly what his role allows.
+    \item \textbf{O2 -- Department management:} provide the five managers with the tools
+          to run their departments (HR, Events, Media, Finance, Materials).
+    \item \textbf{O3 -- Unified communication:} integrate internal chat (direct messages
+          and channels) with file and image sharing.
+    \item \textbf{O4 -- Collaboration:} enable video meetings, tested first with an
+          open-source solution before the final choice.
+    \item \textbf{O5 -- Real-time awareness:} deliver in-app notifications for messages,
+          events, tasks and alerts.
+    \item \textbf{O6 -- Guest integration:} offer a smooth pipeline from public visitor
+          to guest, then to confirmed club member.
+    \item \textbf{O7 -- Traceability:} keep history of activities, finances and material
+          loans for accountability towards the supervisor.
+    \item \textbf{O8 -- Progressive delivery:} ship a Minimum Viable Product (MVP) first,
+          then iterate towards a production-grade version (PROD).
+\end{enumerate}
+
+\clearpage
+
+% =====================================================================
+%  CHAPTER 2 — PROJECT CONTEXT
+% =====================================================================
+\chapter{Project Context}
+
+\section{Project Scope and Constraints}
+
+\subsection{Scope}
+
+The platform covers the following functional perimeter:
+
+\begin{center}
+\begin{tabular}{>{\bfseries}p{3.5cm} p{9.5cm}}
+\toprule
+\textbf{In scope} & \textbf{Out of scope (v1)} \\
+\midrule
+Authentication & Payment gateway integration \\
+Role management (6 roles) & Native mobile application \\
+Departments \& members registry & Email/Telegram notifications (PROD) \\
+Guest application pipeline & Advanced analytics / BI \\
+Events \& RSVP & Self-hosted video infrastructure \\
+Tasks assignment & Full-text search engine \\
+Chat (DM, channels, attachments) & Multi-language UI (PROD) \\
+In-app notifications & \\
+Finance \& materials tracking & \\
+Media gallery \& announcements & \\
+Public landing page & \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Constraints}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Human:} a small student development team, working alongside academic
+          obligations; sprints must be realistic (1--2 weeks).
+    \item \textbf{Technical:} video conferencing must not be self-hosted in v1 (bandwidth
+          and maintenance costs); an external open-source service (Jitsi) is evaluated
+          first.
+    \item \textbf{Financial:} the budget is limited to free tiers and open-source
+          tooling.
+    \item \textbf{Organizational:} the platform must respect the club hierarchy; the
+          professor has read-only access to everything, including chats.
+    \item \textbf{Legal:} personal data of members must be handled responsibly
+          (password hashing, restricted access).
+\end{itemize}
+
+\subsection{Assumptions}
+
+\begin{itemize}[leftmargin=*]
+    \item The club structure (1 professor, 1 leader, 1 co-leader, 5 managers, members,
+          guests) is stable for the duration of the project.
+    \item The user base remains in the order of tens of users, not thousands.
+    \item Users access the platform mainly from laptops and smartphones via a web
+          browser.
+\end{itemize}
+
+\section{Chapter Conclusion}
+
+The project is bounded by tight human and financial constraints but targets a clearly
+identified pain: the absence of a unified, role-aware information system for the club.
+By restricting the scope to a web application with proven open-source technologies, and
+by deferring heavy features (self-hosted video, email alerts) to the production phase,
+the project remains achievable by a student team while delivering real value in the MVP.
+
+\clearpage
+
+% =====================================================================
+%  CHAPTER 3 — STATE OF THE ART
+% =====================================================================
+\chapter{State of the Art}
+
+\section{Existing solutions}
+
+Several categories of existing solutions were analyzed:
+
+\subsection{General messaging tools}
+\textbf{WhatsApp}, \textbf{Telegram} and \textbf{Discord}~\cite{discord} dominate student
+association communication. They provide groups, media sharing and voice channels, but
+offer no role hierarchy matching a club organization, no member registry, and no
+traceability of administrative data. Discord comes closest with text/voice channels and
+role tags, yet it remains a communication tool and not a management system.
+
+\subsection{Collaboration and productivity suites}
+\textbf{Google Workspace} (Drive, Sheets, Forms) and \textbf{Notion} allow clubs to store
+documents, build simple databases and forms~\cite{notion}. They are flexible but require
+manual configuration, lack a coherent permission model, and provide no integrated chat,
+notifications or event workflow.
+
+\subsection{Project and task management}
+\textbf{Trello}, \textbf{Jira} and \textbf{Asana}~\cite{trello} offer boards, tasks and
+deadlines. They fit development teams better than club organizations, and again provide
+no finance, inventory or membership features.
+
+\subsection{Club / association management software}
+Products such as \textbf{WildApricot}, \textbf{MembershipWorks} or management modules of
+\textbf{Moodle}~\cite{moodle} address membership, dues and events. They are designed for
+Western associations, are often paid per member, and do not natively support department
+hierarchies, chat or inventory of electronic components.
+
+\subsection{Communication infrastructure technologies}
+For real-time features, the state of the art converges on \textbf{WebSocket}
+technologies, commonly implemented with \textbf{Socket.io} on Node.js
+applications~\cite{socketio}. For video meetings, the dominant open-source option is
+\textbf{Jitsi Meet}~\cite{jitsi}, which can be embedded in a web page through an iframe
+without operating any media server, at zero cost.
+
+\section{Synthesis and Positioning of the project}
+
+\begin{center}
+\small
+\begin{tabular}{l c c c c c c}
+\toprule
+\textbf{Solution} & \textbf{Roles} & \textbf{Chat} & \textbf{Events} &
+\textbf{Finance} & \textbf{Stock} & \textbf{Free} \\
+\midrule
+WhatsApp / Telegram & -- & \checkmark & partial & -- & -- & \checkmark \\
+Discord             & partial & \checkmark & -- & -- & -- & \checkmark \\
+Google Drive/Sheets & -- & -- & partial & partial & partial & \checkmark \\
+Notion              & partial & -- & partial & partial & partial & partial \\
+Trello / Jira       & partial & -- & -- & -- & -- & partial \\
+WildApricot / Moodle& \checkmark & -- & \checkmark & \checkmark & -- & -- \\
+\textbf{Our platform} & \checkmark & \checkmark & \checkmark & \checkmark &
+\checkmark & \checkmark \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+No single existing solution combines: (i) the exact club hierarchy with a strict
+read-only supervisor, (ii) department-scoped management modules, (iii) chat and
+notifications, and (iv) zero operating cost. The project therefore positions itself as a
+\textbf{lightweight, open-source, role-aware club information system}, built with a
+student-friendly JavaScript stack and leveraging external free services (Jitsi) for heavy
+features.
+
+\section{Wrap-up}
+
+The state of the art confirms the feasibility of every targeted feature: real-time chat
+with Socket.io, embedded video with Jitsi, and role-based web applications with
+component-based front-end frameworks. The differentiation of this project lies in its
+\textbf{integration} and in its \textbf{permission model}, not in technological
+novelty. The next chapter formalizes these needs into requirements, a product backlog and
+a sprint plan.
+
+\clearpage
+
+% =====================================================================
+%  CHAPTER 4 — REQUIREMENTS & PLANNING
+% =====================================================================
+\chapter{Requirements \& Planning}
+
+\section{Methodology}
+
+The project follows \textbf{Scrum}~\cite{scrumguide} with short sprints:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Product Owner:} the club Leader (validates the backlog and priorities).
+    \item \textbf{Scrum Master:} the development team lead (facilitates the process).
+    \item \textbf{Development Team:} the student developers.
+    \item \textbf{Sprint duration:} 1 to 2 weeks; each sprint is reported as one
+          ``Sprint/Chapter'' of this document.
+    \item \textbf{Artifacts:} product backlog (Section~\ref{sec:backlog}), sprint backlog,
+          increment (working software).
+    \item \textbf{Ceremonies:} sprint planning, daily sync, sprint review with the club
+          leaders, sprint retrospective (Section 5.5 of each chapter).
+    \item \textbf{Definition of Done:} feature coded, tested manually, documented and
+          demoed to the Product Owner.
+\end{itemize}
+
+Priorities use the MoSCoW-like notation: \vprio{} (must have in the MVP),
+\testprio{} (evaluated experimentally), \pprio{} (deferred to the production version).
+
+\section{Stakeholder Identification}
+
+\begin{center}
+\begin{tabular}{>{\bfseries}p{2.6cm} p{3.2cm} p{7.4cm}}
+\toprule
+\textbf{Stakeholder} & \textbf{Role w.r.t. project} & \textbf{Involvement} \\
+\midrule
+Professor        & Supervisor / end user (read-only) & Validates that the club
+    activities are traceable and visible \\
+Club Leader      & Product Owner & Prioritizes the backlog, validates increments \\
+Co-Leader        & Deputy Product Owner & Covers the Leader's validations \\
+HR Manager       & End user & Manages members, attendance, applications \\
+Events Manager   & End user & Manages events, RSVPs, reminders \\
+Media Manager    & End user & Manages the gallery and publications \\
+Finance Manager  & End user & Manages income, expenses, budgets \\
+Materials Manager& End user & Manages inventory and loans \\
+Members          & End users & Use tasks, chats, events \\
+Guests           & External users & Public site, application form \\
+Development Team & Builders & Designs, develops, tests and deploys the platform \\
+ISIGK            & Host institution & Provides identity and context \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Functional Requirements}
+
+\begin{longtable}{>{\bfseries}p{1.4cm} p{9.2cm} p{2.4cm} p{1.6cm}}
+\toprule
+\textbf{ID} & \textbf{Requirement} & \textbf{Priority} & \textbf{Sprint} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{ID} & \textbf{Requirement} & \textbf{Priority} & \textbf{Sprint} \\
+\midrule
+\endhead
+FR-01 & Register / login with email and password & \vprio & S1 \\
+FR-02 & Assign, promote and demote roles (guest $\rightarrow$ member $\rightarrow$ manager) & \vprio & S1 \\
+FR-03 & Professor account with global \emph{read-only} access (data + chats) & \vprio & S1 \\
+FR-04 & Manage the 5 departments and the Board team & \vprio & S1 \\
+FR-05 & Members directory with search and department filter & \vprio & S2 \\
+FR-06 & User profile (name, role, department, photo, bio) & \vprio & S2 \\
+FR-07 & Guest application form and approval pipeline & \vprio & S2 \\
+FR-08 & Create / edit / delete events & \vprio & S3 \\
+FR-09 & RSVP and attendee list per event & \vprio & S3 \\
+FR-10 & Assign tasks with deadline and status & \vprio & S3 \\
+FR-11 & Direct messages between users & \vprio & S4 \\
+FR-12 & Department channels (auto-joined) and club-wide channel & \vprio & S4 \\
+FR-13 & Private Board channel (Leader, Co-leader, Professor) & \vprio & S4 \\
+FR-14 & File and image attachments inside chat & \vprio & S4 \\
+FR-15 & Real-time in-app notification center & \vprio & S3--S4 \\
+FR-16 & Record income and expenses with proof & \vprio & S5 \\
+FR-17 & Per-department budgets and monthly report & \vprio & S5 \\
+FR-18 & Materials inventory with quantities and states & \vprio & S5 \\
+FR-19 & Loan / reservation of materials with return date & \vprio & S5 \\
+FR-20 & Low-stock automatic alert & \vprio & S5 \\
+FR-21 & Media gallery (photos, videos) & \vprio & S6 \\
+FR-22 & Public landing page and join form & \vprio & S6 \\
+FR-23 & Announcements from Leader broadcast to all & \vprio & S6 \\
+FR-24 & Role-adapted dashboards (KPIs) & \vprio & S2--S6 \\
+FR-25 & Video meeting button per channel / event & \testprio & S4 (test) \\
+FR-26 & Email notifications & \pprio & PROD \\
+FR-27 & Mentions and read receipts & \pprio & PROD \\
+FR-28 & Kanban task board & \pprio & PROD \\
+FR-29 & Member dues tracking & \pprio & PROD \\
+FR-30 & Purchase requests (Materials $\rightarrow$ Finance) & \pprio & PROD \\
+FR-31 & Extra sub-channels created by managers & \pprio & PROD \\
+FR-32 & Post-event reports with photos & \pprio & PROD \\
+FR-33 & Social media posts planner & \pprio & PROD \\
+FR-34 & Multi-language interface (FR / EN) & \pprio & PROD \\
+FR-35 & Notification preferences per user & \pprio & PROD \\
+\bottomrule
+\end{longtable}
+
+\section{Non Functional Requirements}
+
+\begin{center}
+\begin{tabular}{>{\bfseries}p{2.8cm} p{11cm}}
+\toprule
+\textbf{Category} & \textbf{Requirement} \\
+\midrule
+Security & Passwords hashed (bcrypt), JWT sessions, strict server-side role checks,
+           protection against SQL injection and XSS \\
+Confidentiality & A user only accesses his department's data; the Leader, Co-leader and
+           Professor access everything; the Professor cannot modify anything \\
+Performance & Pages load in $<$ 2s on a standard campus connection; chat messages
+           delivered in $<$ 500ms \\
+Availability & Hosted on a free-tier service with $\geq$ 95\% availability; graceful
+           degradation if the video service is down \\
+Usability & Responsive interface (desktop + mobile), French/English friendly,
+           discoverable navigation per role \\
+Reliability & Daily database backups; no data loss on server restart \\
+Scalability & Architecture able to serve 100+ users without redesign \\
+Maintainability & Modular code (one module per department), documented API, version
+           control with Git \\
+Portability & Runs on any system with a modern browser; deployable on Linux hosting \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Product Backlog}
+\label{sec:backlog}
+
+\subsection{Epic summary}
+
+\begin{center}
+\begin{tabular}{>{\bfseries}p{1.2cm} p{4.6cm} p{6.4cm}}
+\toprule
+\textbf{Epic} & \textbf{Title} & \textbf{Contains} \\
+\midrule
+E1  & Authentication \& Roles     & Login, roles, professor read-only \\
+E2  & Departments \& Members      & Registry, directory, profiles, guest pipeline \\
+E3  & Events                      & Events, RSVP, reminders \\
+E4  & Tasks                       & Assignment, deadlines, statuses \\
+E5  & Chat                        & DM, channels, attachments \\
+E6  & Video Meetings              & Jitsi experiment, meeting buttons \\
+E7  & Notifications               & In-app center, real-time \\
+E8  & Finance                     & Income, expenses, budgets, reports \\
+E9  & Materials                   & Inventory, loans, stock alerts \\
+E10 & Media                       & Gallery, public preview \\
+E11 & Announcements               & Leader broadcasts \\
+E12 & Public Site                 & Landing page, join form \\
+E13 & Settings                    & Profile, password, preferences \\
+E14 & Dashboards                  & Role-adapted KPIs \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{User stories — MVP}
+
+\begin{longtable}{>{\bfseries}p{1.5cm} p{9.6cm} p{2.6cm}}
+\toprule
+\textbf{ID} & \textbf{As a \dots I want to \dots so that \dots} & \textbf{Epic} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{ID} & \textbf{Story} & \textbf{Epic} \\
+\midrule
+\endhead
+US-1.1 & As a \textbf{visitor} I want to register and log in so that I access the platform & E1 \\
+US-1.2 & As a \textbf{leader} I want to assign roles so that each user gets the right permissions & E1 \\
+US-1.3 & As a \textbf{professor} I want to view all data and chats read-only so that I supervise the club & E1 \\
+US-2.1 & As a \textbf{leader} I want the 5 departments created so that the club is structured & E2 \\
+US-2.2 & As a \textbf{manager} I want to see the members of my department so that I coordinate them & E2 \\
+US-2.3 & As a \textbf{member} I want a profile so that others identify me & E2 \\
+US-2.4 & As a \textbf{guest} I want to apply to join a department so that I become a member & E2 \\
+US-2.5 & As a \textbf{manager} I want to accept or refuse applications so that I control my team & E2 \\
+US-3.1 & As an \textbf{events manager} I want to create events so that the club is informed & E3 \\
+US-3.2 & As a \textbf{member} I want to RSVP so that organizers plan properly & E3 \\
+US-3.3 & As a \textbf{member} I want to receive event reminders so that I don't miss them & E3 \\
+US-4.1 & As a \textbf{manager} I want to assign tasks to my members so that work progresses & E4 \\
+US-4.2 & As a \textbf{leader} I want to assign tasks to managers so that objectives are tracked & E4 \\
+US-4.3 & As a \textbf{member} I want to update my task status so that everyone sees progress & E4 \\
+US-5.1 & As a \textbf{member} I want to send direct messages so that I communicate privately & E5 \\
+US-5.2 & As a \textbf{member} I want a department channel so that my team discusses in one place & E5 \\
+US-5.3 & As a \textbf{member} I want a club-wide channel so that news reaches everyone & E5 \\
+US-5.4 & As a \textbf{leader} I want a private Board channel so that strategy stays confidential & E5 \\
+US-5.5 & As a \textbf{member} I want to share files and images in chat so that we exchange documents & E5 \\
+US-7.1 & As a \textbf{user} I want a notification center so that I never miss anything & E7 \\
+US-7.2 & As a \textbf{user} I want real-time notifications so that I don't refresh the page & E7 \\
+US-8.1 & As a \textbf{finance manager} I want to record income and expenses so that finances are traceable & E8 \\
+US-8.2 & As a \textbf{leader} I want per-department budgets so that spending is controlled & E8 \\
+US-8.3 & As a \textbf{professor} I want a monthly financial report so that I supervise the club budget & E8 \\
+US-9.1 & As a \textbf{materials manager} I want an inventory so that stock is known & E9 \\
+US-9.2 & As a \textbf{member} I want to borrow material with a return date so that items come back & E9 \\
+US-9.3 & As a \textbf{materials manager} I want low-stock alerts so that I reorder in time & E9 \\
+US-10.1 & As a \textbf{media manager} I want to upload photos and videos so that activities are showcased & E10 \\
+US-10.2 & As a \textbf{visitor} I want to see a public gallery preview so that I discover the club & E10 \\
+US-11.1 & As a \textbf{leader} I want to post announcements so that the whole club is informed & E11 \\
+US-12.1 & As a \textbf{visitor} I want a landing page so that I understand the club & E12 \\
+US-12.2 & As a \textbf{visitor} I want a join form so that I become a guest & E12 \\
+US-13.1 & As a \textbf{user} I want to edit my profile and password so that my data stays correct & E13 \\
+US-14.1 & As a \textbf{leader} I want club KPIs so that I pilot the club & E14 \\
+US-14.2 & As a \textbf{manager} I want department KPIs so that I pilot my team & E14 \\
+US-14.3 & As a \textbf{member} I want my tasks and my department news in one place & E14 \\
+\bottomrule
+\end{longtable}
+
+\subsection{User stories — Video experiment (TEST)}
+
+\begin{center}
+\begin{tabular}{>{\bfseries}p{1.5cm} p{10cm} p{2.2cm}}
+\toprule
+\textbf{ID} & \textbf{Story} & \textbf{Epic} \\
+\midrule
+US-6.1 & As a \textbf{user} I want a ``Start meeting'' button in a channel so that we talk face to face & E6 \\
+US-6.2 & As a \textbf{manager} I want a permanent room for my department so that meetings are easy & E6 \\
+US-6.3 & As a \textbf{member} I want a ``Join meeting'' button on events so that I attend remotely & E6 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Decision gate:} Jitsi Meet is prototyped in Sprint~4; the team accepts or rejects
+it in the Sprint~4 review before integrating it into the MVP.
+
+\subsection{User stories — Production version (PROD)}
+
+\begin{center}
+\begin{tabular}{>{\bfseries}p{1.5cm} p{10cm} p{2.2cm}}
+\toprule
+\textbf{ID} & \textbf{Story} & \textbf{Epic} \\
+\midrule
+US-6.4 & As a \textbf{user} I want meetings integrated natively & E6 \\
+US-7.3 & As a \textbf{user} I want email notifications for important events & E7 \\
+US-7.4 & As a \textbf{user} I want Telegram alerts so that I stay informed on my phone & E7 \\
+US-5.6 & As a \textbf{user} I want @mentions and read receipts & E5 \\
+US-5.7 & As a \textbf{manager} I want to create sub-channels in my department & E5 \\
+US-4.4 & As a \textbf{manager} I want a kanban board so that I visualize tasks & E4 \\
+US-8.4 & As a \textbf{finance manager} I want to track member dues & E8 \\
+US-9.4 & As a \textbf{materials manager} I want purchase requests sent to Finance & E9 \\
+US-3.4 & As an \textbf{organizer} I want a post-event report with photos & E3 \\
+US-10.3 & As a \textbf{media manager} I want a social posts planner & E10 \\
+US-12.3 & As a \textbf{visitor} I want the site in French and English & E12 \\
+US-13.2 & As a \textbf{user} I want notification preferences & E13 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Sprint / Chapter Planning}
+\label{sec:sprintplan}
+
+Each sprint is delivered and documented as one chapter of this report.
+
+\begin{longtable}{>{\bfseries}p{1.3cm} p{5.2cm} p{5.6cm} p{1.6cm}}
+\toprule
+\textbf{Sprint} & \textbf{Goal} & \textbf{Main deliverables} & \textbf{Chapter} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Sprint} & \textbf{Goal} & \textbf{Main deliverables} & \textbf{Chapter} \\
+\midrule
+\endhead
+S0 & Project setup & Repo, environment, skeleton app, this backlog & Ch. 5 \\
+S1 & Access control & Auth, 6 roles, RBAC, profiles & Ch. 6 \\
+S2 & Members & Departments, directory, guest pipeline, dashboard base & Ch. 7 \\
+S3 & Organization & Events, RSVP, tasks, notifications core & Ch. 8 \\
+S4 & Communication & Chat (DM, channels, attachments) + video test (Jitsi) & Ch. 9 \\
+S5 & Resources & Finance, budgets, inventory, loans, stock alerts & Ch. 10 \\
+S6 & Visibility & Media gallery, announcements, public landing page & Ch. 11 \\
+S7 & Hardening & Testing, bug fixing, deployment, demo data, handover & Ch. 12 \\
+--- & \textbf{PROD phase} & Email, Telegram, kanban, dues, sub-channels\dots & Ch. 13+ \\
+\bottomrule
+\end{longtable}
+
+\section{Conclusion}
+
+This chapter transformed the club's needs into a formal requirement set: 35 functional
+requirements, 9 categories of non-functional requirements, a backlog of 14 epics and more
+than 50 user stories split between MVP, experimental and production scopes, and a
+sprint plan aligned with the report structure. The project is now ready to enter Sprint~0,
+which initializes the technical environment and the application skeleton.
+
+\clearpage
+
+% =====================================================================
+%  CHAPTER 5 — SPRINT / CHAPTER 0
+% =====================================================================
+\chapter{Sprint / Chapter 0}
+
+\section{Introduction}
+
+Sprint~0 is an initialization sprint: it does not deliver business features but sets up
+everything the following sprints depend on -- repository, environment, application
+skeleton, common conventions and the product backlog validated with the Product Owner.
+
+\textbf{Sprint goal:} ``A running skeleton application with authentication stubs and a
+validated backlog.''
+
+\section{Actors}
+
+The actors of the system are formalized as follows (they are refined in every sprint):
+
+\begin{center}
+\begin{tabular}{>{\bfseries}p{2.4cm} p{5.2cm} p{5.8cm}}
+\toprule
+\textbf{Actor} & \textbf{Description} & \textbf{Main interactions} \\
+\midrule
+Professor     & Club supervisor, read-only on everything & View dashboards, data, chats \\
+Leader        & Club head, full control & Manage all, assign roles, validate \\
+Co-Leader     & Deputy head & Same powers as the Leader \\
+HR Manager    & Head of Human Resources & Members, attendance, applications \\
+Events Manager& Head of Events & Events, RSVP, reminders \\
+Media Manager & Head of Media & Gallery, publications \\
+Finance Manager & Head of Finance & Income, expenses, budgets \\
+Materials Manager & Head of Materials & Inventory, loans, alerts \\
+Member        & Department member & Tasks, chats, events, loans \\
+Guest         & Visitor / trial user & Public site, application, limited chat \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Diagrams}
+
+\begin{figure}[htbp]
+    \centering
+    \fbox{\parbox[c][6cm][c]{0.92\linewidth}{\centering
+        \textbf{Use Case Diagram (UML)}\\[0.4cm]
+        \todo{Insert \texttt{usecase\_global.png} after Sprint 0 review}\\
+        Actors: Professor, Leader, Co-leader, 5 Managers, Member, Guest
+    }}
+    \caption{Global use case diagram — to be delivered in Sprint 0}
+    \label{fig:usecase}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \fbox{\parbox[c][6cm][c]{0.92\linewidth}{\centering
+        \textbf{Class / Data Model Diagram}\\[0.4cm]
+        \todo{Insert entity-relationship diagram (users, departments, events,
+        messages, notifications, expenses, materials, \dots)}
+    }}
+    \caption{Data model — to be delivered in Sprint 0}
+    \label{fig:datamodel}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \fbox{\parbox[c][5cm][c]{0.92\linewidth}{\centering
+        \textbf{Architecture Diagram (3 tiers)}\\[0.4cm]
+        \todo{Browser (React) $\rightarrow$ API (Node/Express) $\rightarrow$ Database;
+        Socket.io channel; Jitsi iframe}
+    }}
+    \caption{Technical architecture — to be delivered in Sprint 0}
+    \label{fig:arch}
+\end{figure}
+
+\section{Technology Stack}
+
+\textbf{To be defined and justified in the Sprint~0 review with the Product Owner.}
+The shortlist discussed so far:
+
+\begin{center}
+\begin{tabular}{p{3.4cm} p{10cm}}
+\toprule
+\textbf{Layer} & \textbf{Candidates} \\
+\midrule
+Front-end   & React + Vite, or Next.js \\
+Back-end    & Node.js + Express, or Next.js API routes \\
+Database    & SQLite (dev) $\rightarrow$ PostgreSQL (hosted) \\
+Real-time   & Socket.io \\
+Video       & Jitsi Meet (embedded) — \testprio decision gate \\
+Auth        & JWT + bcrypt \\
+Deployment  & Free tier (Vercel / Railway / local server) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\todo{Fill this table with the final choices and add a justification paragraph after
+the Sprint 0 review.}
+
+\section{Review \& Retrospective}
+
+\textbf{Sprint review:} \todo{to be filled after the review meeting with the Product
+Owner (date, demo feedback, backlog adjustments).}
+
+\begin{center}
+\begin{tabular}{p{4.6cm} p{4.6cm} p{4.6cm}}
+\toprule
+\textbf{What went well} & \textbf{What went wrong} & \textbf{Actions to improve} \\
+\midrule
+\todo{} & \todo{} & \todo{} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Conclusion}
+
+Sprint~0 \todo{conclusion to be written after the sprint: environment status, backlog
+validation, decisions taken (stack, video solution), and outlook for Sprint~1.}
+
+\clearpage
+
+% =====================================================================
+%  CHAPTER 6 — SPRINT / CHAPTER 1
+% =====================================================================
+\chapter{Sprint / Chapter 1}
+
+\section{Introduction}
+\todo{Sprint 1 goal: authentication, the 6 roles and role-based access control.}
+
+\section{Actors}
+\todo{Actors concerned by this sprint and their permissions matrix.}
+
+\section{Diagrams}
+\todo{Use case (auth), sequence diagram (login), class diagram (User, Role).}
+
+\section{Technology Stack}
+\todo{Technologies used and difficulties encountered for this sprint.}
+
+\section{Review \& Retrospective}
+\todo{Review feedback and retrospective table.}
+
+\section{Conclusion}
+\todo{Sprint 1 conclusion and outlook for Sprint 2.}
+
+% =====================================================================
+%  (Further sprint chapters are duplicated with the same 6 sections)
+% =====================================================================
+%  CHAPTER 7  — Sprint 2 : Members, departments, guest pipeline
+%  CHAPTER 8  — Sprint 3 : Events, tasks, notifications
+%  CHAPTER 9  — Sprint 4 : Chat + video test (Jitsi)
+%  CHAPTER 10 — Sprint 5 : Finance + Materials
+%  CHAPTER 11 — Sprint 6 : Media, announcements, public site
+%  CHAPTER 12 — Sprint 7 : Testing, deployment, handover
+%  CHAPTER 13 — Production phase
+% =====================================================================
+
+\clearpage
+
+% =====================================================================
+%  GENERAL CONCLUSION
+% =====================================================================
+\chapter{General Conclusion}
+
+\todo{To be written at the end of the project: recap of the initial problem, the
+delivered MVP, the PROD outlook, measured results (users, feedback from the club,
+metrics), individual learnings and perspectives (mobile app, native video, inter-club
+federation).}
+
+\clearpage
+
+% =====================================================================
+%  BIBLIOGRAPHY
+% =====================================================================
+\chapter*{Bibliography}
+\addcontentsline{toc}{chapter}{Bibliography}
+
+\begin{enumerate}[label={[\arabic*]}]
+    \item K. Schwaber and J. Sutherland, \emph{The Scrum Guide: The Definitive Guide to
+          Scrum: The Rules of the Game}, 2020. [Online]. Available:
+          \url{https://www.scrumguides.org/scrum-guide.html}
+    \item R. S. Pressman and B. R. Maxim, \emph{Software Engineering: A Practitioner's
+          Approach}, 9th ed. McGraw-Hill, 2019.
+    \item I. Sommerville, \emph{Software Engineering}, 10th ed. Pearson, 2015.
+    \item C. Larman, \emph{Applying UML and Patterns: An Introduction to Object-Oriented
+          Analysis and Design and Iterative Development}, 3rd ed. Prentice Hall, 2004.
+    \item Mozilla Web Docs, ``The WebSocket API.'' [Online]. Available:
+          \url{https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API}
+\end{enumerate}
+
+% =====================================================================
+%  APPENDICES
+% =====================================================================
+\clearpage
+\appendix
+\chapter{Appendix A — Database draft}
+\todo{Physical data model, table descriptions and sample SQL schema.}
+
+\chapter{Appendix B — Screenshots}
+\todo{Screenshots of each sprint increment.}
+
+\chapter{Appendix C — Meeting minutes}
+\todo{Sprint reviews and Product Owner validation minutes.}
+
+\chapter{Appendix D — Backlog export}
+\todo{CSV/board export of the product backlog.}
+
+% =====================================================================
+%  WEBOGRAPHY
+% =====================================================================
+\chapter*{Webography}
+\addcontentsline{toc}{chapter}{Webography}
+
+\begin{itemize}[leftmargin=*]
+    \item Scrum Guide. \url{https://www.scrumguides.org/}
+    \item React — official documentation. \url{https://react.dev/}
+    \item Vite. \url{https://vitejs.dev/}
+    \item Node.js. \url{https://nodejs.org/}
+    \item Express.js. \url{https://expressjs.com/}
+    \item Socket.io. \url{https://socket.io/}
+    \item Jitsi Meet handbook. \url{https://jitsi.github.io/handbook/}
+    \item SQLite. \url{https://www.sqlite.org/}
+    \item PostgreSQL. \url{https://www.postgresql.org/}
+    \item JSON Web Tokens. \url{https://jwt.io/}
+    \item bcrypt. \url{https://www.npmjs.com/package/bcrypt}
+\end{itemize}
+
+\end{document}

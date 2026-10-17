@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+
+# runtime data — created by the server, never committed
+platform/server/club.db
+platform/server/club.db-wal
+platform/server/club.db-shm
+platform/server/uploads/
+backups/
+platform/server/.jwt-secret
+club-demo-backup*
+uploads-demo-backup/
+
+# misc
+*.log
+.DS_Store
+Thumbs.db

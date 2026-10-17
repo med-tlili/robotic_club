@@ -1,0 +1,412 @@
+// ============================================================
+//  db.js — SQLite database: schema + seed data (Sprint 0)
+// ============================================================
+const Database = require('better-sqlite3');
+const path = require('path');
+const bcrypt = require('bcryptjs');
+
+// DB_PATH lets production keep the database on a persistent disk
+// (and lets tests run a fresh-install instance next to the demo one)
+const db = new Database(process.env.DB_PATH || path.join(__dirname, 'club.db'));
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
+
+// ---------------- Schema ----------------
+db.exec(`
+CREATE TABLE IF NOT EXISTS departments (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug        TEXT UNIQUE NOT NULL,        -- hr | events | media | finance | materials
+  name        TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  coming_soon INTEGER DEFAULT 0            -- 1 = materials (coming soon)
+);
+
+CREATE TABLE IF NOT EXISTS users (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  email         TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  full_name     TEXT NOT NULL,
+  role          TEXT NOT NULL CHECK(role IN ('professor','leader','coleader','manager','member','guest')),
+  department_id INTEGER REFERENCES departments(id),
+  bio           TEXT DEFAULT '',
+  created_at    TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS goals (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  department_id INTEGER NOT NULL REFERENCES departments(id),
+  title         TEXT NOT NULL,
+  description   TEXT DEFAULT '',
+  due_date      TEXT,
+  created_by    INTEGER REFERENCES users(id),
+  created_at    TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS posts (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  department_id INTEGER NOT NULL REFERENCES departments(id),
+  author_id     INTEGER NOT NULL REFERENCES users(id),
+  type          TEXT NOT NULL DEFAULT 'announcement' CHECK(type IN ('announcement','clip','offer')),
+  title         TEXT NOT NULL,
+  body          TEXT DEFAULT '',
+  image         TEXT DEFAULT '',
+  created_at    TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS votes (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id    INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  value      TEXT NOT NULL CHECK(value IN ('yes','no')),
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(post_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS comments (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id    INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  author_id  INTEGER NOT NULL REFERENCES users(id),
+  body       TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  title       TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  event_date  TEXT NOT NULL,
+  event_time  TEXT DEFAULT '',
+  location    TEXT DEFAULT '',
+  created_by  INTEGER REFERENCES users(id),
+  created_at  TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS applications (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       INTEGER NOT NULL REFERENCES users(id),
+  department_id INTEGER NOT NULL REFERENCES departments(id),
+  message       TEXT DEFAULT '',
+  status        TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','refused')),
+  reviewed_by   INTEGER REFERENCES users(id),
+  created_at    TEXT DEFAULT (datetime('now')),
+  reviewed_at   TEXT
+);
+
+CREATE TABLE IF NOT EXISTS tasks (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  department_id INTEGER NOT NULL REFERENCES departments(id),
+  title         TEXT NOT NULL,
+  description   TEXT DEFAULT '',
+  assigned_to   INTEGER REFERENCES users(id),
+  status        TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo','doing','done')),
+  due_date      TEXT,
+  created_by    INTEGER REFERENCES users(id),
+  created_at    TEXT DEFAULT (datetime('now')),
+  completed_at  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type       TEXT NOT NULL,
+  title      TEXT NOT NULL,
+  body       TEXT DEFAULT '',
+  link       TEXT DEFAULT '',
+  is_read    INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  scope         TEXT NOT NULL CHECK(scope IN ('global','managers','dept','private')),
+  department_id INTEGER REFERENCES departments(id),
+  sender_id     INTEGER NOT NULL REFERENCES users(id),
+  recipient_id  INTEGER REFERENCES users(id),
+  body            TEXT DEFAULT '',
+  attachment      TEXT DEFAULT '',
+  attachment_name TEXT DEFAULT '',
+  created_at    TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS chat_reads (
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  room        TEXT NOT NULL,
+  last_read_id INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, room)
+);
+
+-- Sprint 6 · Media: private albums + media items (shareable to the public feed)
+CREATE TABLE IF NOT EXISTS albums (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  department_id INTEGER NOT NULL REFERENCES departments(id),
+  title         TEXT NOT NULL,
+  description   TEXT DEFAULT '',
+  created_by    INTEGER REFERENCES users(id),
+  created_at    TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS album_media (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  album_id      INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+  file_path     TEXT NOT NULL,
+  thumb_path    TEXT DEFAULT '',
+  caption       TEXT DEFAULT '',
+  shared_post_id INTEGER REFERENCES posts(id),
+  created_at    TEXT DEFAULT (datetime('now'))
+);
+
+-- Sprint 6 · HR: attendance, meeting conclusions, rule-break alerts
+CREATE TABLE IF NOT EXISTS attendance (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  meeting_date TEXT NOT NULL,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status      TEXT NOT NULL DEFAULT 'present' CHECK(status IN ('present','absent','late')),
+  notes       TEXT DEFAULT '',
+  marked_by   INTEGER REFERENCES users(id),
+  created_at  TEXT DEFAULT (datetime('now')),
+  UNIQUE (meeting_date, user_id)
+);
+CREATE TABLE IF NOT EXISTS meeting_notes (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  title       TEXT NOT NULL,
+  body        TEXT DEFAULT '',
+  meeting_date TEXT,
+  created_by  INTEGER REFERENCES users(id),
+  created_at  TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS alerts (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER REFERENCES users(id),
+  title       TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  severity    TEXT NOT NULL DEFAULT 'minor' CHECK(severity IN ('minor','major','critical')),
+  reported_by INTEGER REFERENCES users(id),
+  created_at  TEXT DEFAULT (datetime('now'))
+);
+
+-- 2026-10-16 · off-site backups: what we pushed to Google Drive (per month)
+-- + tiny key/value settings (last sync status…)
+CREATE TABLE IF NOT EXISTS drive_backups (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  month      TEXT NOT NULL,           -- '2026-10'
+  path       TEXT NOT NULL,           -- 'club.db' | 'uploads/public/x.png' …
+  size       INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE (month, path)
+);
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT DEFAULT ''
+);
+
+-- Sprint 6 · Events: itineraries + decoration planning
+CREATE TABLE IF NOT EXISTS itineraries (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  title       TEXT NOT NULL,
+  event_date  TEXT,
+  steps       TEXT DEFAULT '',
+  created_by  INTEGER REFERENCES users(id),
+  created_at  TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS decorations (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  title       TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  status      TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo','in_progress','done')),
+  created_by  INTEGER REFERENCES users(id),
+  created_at  TEXT DEFAULT (datetime('now'))
+);
+
+-- Sprint 5 · Finance: sponsor pipeline + budget (private to Finance)
+CREATE TABLE IF NOT EXISTS sponsors (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL,
+  contact     TEXT DEFAULT '',
+  status      TEXT NOT NULL DEFAULT 'lead' CHECK(status IN ('lead','contacted','negotiating','won','declined')),
+  kind        TEXT NOT NULL DEFAULT 'money' CHECK(kind IN ('money','goods')),
+  value       REAL DEFAULT 0,
+  details     TEXT DEFAULT '',
+  notes       TEXT DEFAULT '',
+  created_by  INTEGER REFERENCES users(id),
+  created_at  TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS budget_entries (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind       TEXT NOT NULL CHECK(kind IN ('income','expense')),
+  label      TEXT NOT NULL,
+  amount     REAL NOT NULL DEFAULT 0,
+  entry_date TEXT,
+  notes      TEXT DEFAULT '',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT DEFAULT (datetime('now'))
+);
+`);
+
+// ---------------- Migrations (safe on an existing database) ----------------
+// 2026-10-15 · a sponsor can contribute GOODS (food, tech, material…) — the
+// pipeline used to be money-only, so `kind` + `details` are added if missing
+const sponsorCols = db.prepare('PRAGMA table_info(sponsors)').all().map((c) => c.name);
+if (!sponsorCols.includes('kind')) db.exec("ALTER TABLE sponsors ADD COLUMN kind TEXT NOT NULL DEFAULT 'money'");
+if (!sponsorCols.includes('details')) db.exec("ALTER TABLE sponsors ADD COLUMN details TEXT DEFAULT ''");
+
+// 2026-10-15 · media storage rework (storage.js): thumbnails for album
+// grids + the original attachment filename kept for display
+const mediaCols = db.prepare('PRAGMA table_info(album_media)').all().map((c) => c.name);
+if (!mediaCols.includes('thumb_path')) db.exec("ALTER TABLE album_media ADD COLUMN thumb_path TEXT DEFAULT ''");
+const msgCols = db.prepare('PRAGMA table_info(messages)').all().map((c) => c.name);
+if (!msgCols.includes('attachment_name')) db.exec("ALTER TABLE messages ADD COLUMN attachment_name TEXT DEFAULT ''");
+
+// ---------------- Seed ----------------
+// Demo content (accounts, posts, events, tasks, messages) is skipped when
+// ISIGK_DEMO_ACCOUNTS=0 — the real production install: only the departments
+// are created, the Professor registers himself on /signup, then creates the
+// Leader and the club fills up with real people. (Default: demo ON.)
+const DEMO = process.env.ISIGK_DEMO_ACCOUNTS !== '0';
+
+const deptCount = db.prepare('SELECT COUNT(*) AS c FROM departments').get().c;
+if (deptCount === 0) {
+  const insDept = db.prepare(
+    'INSERT INTO departments (slug, name, description, coming_soon) VALUES (?,?,?,?)'
+  );
+  insDept.run('hr',       'Human Resources', 'Members, attendance and discipline', 0);
+  insDept.run('events',   'Events',          'Events planning, itineraries and decoration', 0);
+  insDept.run('media',    'Media',           'Albums, clips and social media', 0);
+  insDept.run('finance',  'Finance',         'Budget, expenses and sponsors', 0);
+  insDept.run('materials','Materials',       'Inventory and loans', 1); // coming soon
+
+  if (DEMO) {
+  const hash = bcrypt.hashSync('password123', 10);
+  const insUser = db.prepare(
+    'INSERT INTO users (email, password_hash, full_name, role, department_id, bio) VALUES (?,?,?,?,?,?)'
+  );
+  const deptId = (slug) => db.prepare('SELECT id FROM departments WHERE slug=?').get(slug).id;
+
+  // Demo accounts — password for all: password123
+  insUser.run('professor@isigk.tn', hash, 'Pr. Ahmed Supervisor', 'professor', null, 'Club supervisor');
+  insUser.run('leader@isigk.tn',    hash, 'Karim Leader',         'leader',    null, 'Club leader');
+  insUser.run('coleader@isigk.tn',  hash, 'Sara Co-Leader',       'coleader',  null, 'Club co-leader');
+  insUser.run('hr@isigk.tn',        hash, 'Rania HR Manager',     'manager',   deptId('hr'),     'Head of HR');
+  insUser.run('events@isigk.tn',    hash, 'Mehdi Events Manager', 'manager',   deptId('events'), 'Head of Events');
+  insUser.run('media@isigk.tn',     hash, 'Yassine Media Manager','manager',   deptId('media'),  'Head of Media');
+  insUser.run('finance@isigk.tn',   hash, 'Amel Finance Manager', 'manager',   deptId('finance'),'Head of Finance');
+  insUser.run('member@isigk.tn',    hash, 'Omar Member',          'member',    deptId('hr'),     'HR member');
+  insUser.run('guest@isigk.tn',     hash, 'Lina Guest',           'guest',     null,             'Visitor');
+  console.log('Database seeded with demo accounts.');
+  } // DEMO accounts
+}
+
+// Seed demo posts (only if missing) so feeds are not empty on first run
+const seeded = db.prepare("SELECT COUNT(*) AS c FROM posts WHERE title = 'Sponsor offer — TechnoVision'").get().c;
+if (DEMO && seeded === 0) {
+  db.exec('DELETE FROM posts'); // clear any partial seed (votes/comments cascade)
+  const u = (email) => db.prepare('SELECT id FROM users WHERE email=?').get(email).id;
+  const d = (slug) => db.prepare('SELECT id FROM departments WHERE slug=?').get(slug).id;
+  const addPost = db.prepare(
+    `INSERT INTO posts (department_id, author_id, type, title, body, created_at) VALUES (?,?,?,?,?, datetime('now', ?))`
+  );
+  const addVote = db.prepare(`INSERT INTO votes (post_id, user_id, value) VALUES (?,?,?)`);
+  const addComment = db.prepare(
+    `INSERT INTO comments (post_id, author_id, body, created_at) VALUES (?,?,?, datetime('now', ?))`
+  );
+
+  const p1 = addPost.run(d('media'), u('media@isigk.tn'), 'clip',
+    'Teaser clip for the winter competition',
+    'First cut of the 30s teaser — we need a Yes/No from the team before posting it on the club page.',
+    '-2 hours').lastInsertRowid;
+  addVote.run(p1, u('leader@isigk.tn'), 'yes');
+  addVote.run(p1, u('member@isigk.tn'), 'yes');
+  addComment.run(p1, u('leader@isigk.tn'), 'Great pacing, go ahead once the logo is fixed.', '-1 hours');
+
+  const p2 = addPost.run(d('finance'), u('finance@isigk.tn'), 'offer',
+    'Sponsor offer — TechnoVision',
+    'They propose 1500 TND for the season in exchange for their logo on our t-shirts and a mention in every post.',
+    '-1 days').lastInsertRowid;
+  addVote.run(p2, u('coleader@isigk.tn'), 'yes');
+  addComment.run(p2, u('coleader@isigk.tn'), 'Good offer. Ask if it covers both events.', '-20 hours');
+
+  console.log('Demo posts seeded.');
+}
+
+// Seed demo events (only if none) for the calendar
+const eventCount = db.prepare('SELECT COUNT(*) AS c FROM events').get().c;
+if (DEMO && eventCount === 0) {
+  const leaderId = db.prepare("SELECT id FROM users WHERE email='leader@isigk.tn'").get()?.id ?? null;
+  const ins = db.prepare(
+    `INSERT INTO events (title, description, event_date, event_time, location, created_by) VALUES (?,?,?,?,?,?)`
+  );
+  const day = (offset) => {
+    const d = new Date(Date.now() + offset * 86400000);
+    return d.toISOString().slice(0, 10);
+  };
+  ins.run('General assembly', 'Kick-off of the season: objectives and team assignments.', day(5), '14:00', 'Amphi A', leaderId);
+  ins.run('Robotics workshop — sensors', 'Hands-on session with ultrasonic sensors. Bring your laptop.', day(12), '10:00', 'Lab 203', leaderId);
+  ins.run('Competition registration deadline', 'Final date to register the team for the national challenge.', day(25), '', 'Online', leaderId);
+  console.log('Demo events seeded.');
+}
+
+// Seed demo tasks (only if none) so the private spaces are not empty
+const taskCount = db.prepare('SELECT COUNT(*) AS c FROM tasks').get().c;
+if (DEMO && taskCount === 0) {
+  const u = (email) => db.prepare('SELECT id FROM users WHERE email=?').get(email).id;
+  const d = (slug) => db.prepare('SELECT id FROM departments WHERE slug=?').get(slug).id;
+  const ins = db.prepare(
+    `INSERT INTO tasks (department_id, title, description, assigned_to, status, due_date, created_by, created_at)
+     VALUES (?,?,?,?,?,?,?, datetime('now', ?))`
+  );
+  ins.run(d('hr'), 'Plan the general assembly seating', 'Book room + prepare the attendance sheet.',
+    u('member@isigk.tn'), 'doing', null, u('hr@isigk.tn'), '-1 days');
+  ins.run(d('media'), 'Record the workshop recap video', 'Short 60s vertical video for Instagram.',
+    null, 'todo', null, u('media@isigk.tn'), '-3 hours');
+  ins.run(d('events'), 'Send invitation emails to partner clubs', '',
+    u('events@isigk.tn'), 'done', null, u('leader@isigk.tn'), '-2 days');
+  console.log('Demo tasks seeded.');
+}
+
+// Seed demo chat messages (only if none)
+const msgCount = db.prepare('SELECT COUNT(*) AS c FROM messages').get().c;
+if (DEMO && msgCount === 0) {
+  const u = (email) => db.prepare('SELECT id FROM users WHERE email=?').get(email).id;
+  const d = (slug) => db.prepare('SELECT id FROM departments WHERE slug=?').get(slug).id;
+  const ins = db.prepare(
+    `INSERT INTO messages (scope, department_id, sender_id, recipient_id, body, created_at)
+     VALUES (?,?,?,?,?, datetime('now', ?))`
+  );
+  // global chat
+  ins.run('global', null, u('leader@isigk.tn'), null, 'Welcome to the club chat everyone. Keep it professional.', '-2 days');
+  ins.run('global', null, u('coleader@isigk.tn'), null, 'Reminder: general assembly next Monday, 14h, room 203.', '-1 days');
+  ins.run('global', null, u('member@isigk.tn'), null, 'Noted, thank you.', '-1 hours');
+  // managers chat
+  ins.run('managers', null, u('leader@isigk.tn'), null, 'Managers: please submit your department reports before Friday.', '-2 days');
+  ins.run('managers', null, u('hr@isigk.tn'), null, 'HR report will be ready tomorrow.', '-1 days');
+  // HR dept chat
+  ins.run('dept', d('hr'), u('hr@isigk.tn'), null, 'Team, we need two volunteers for the assembly desk.', '-1 days');
+  ins.run('dept', d('hr'), u('member@isigk.tn'), null, 'I can help.', '-1 hours');
+  // private DM: leader <-> member
+  ins.run('private', null, u('leader@isigk.tn'), u('member@isigk.tn'), 'Hi Omar, could you take charge of the attendance sheet?', '-1 days');
+  ins.run('private', null, u('member@isigk.tn'), u('leader@isigk.tn'), 'Yes, on it.', '-1 hours');
+  console.log('Demo chat seeded.');
+}
+
+// Everyone starts with chat read pointers set to the last seeded message
+// (so unread badges start at 0 and grow live)
+const maxMsg = db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM messages').get().m;
+if (maxMsg > 0) {
+  db.prepare(
+    `INSERT INTO chat_reads (user_id, room, last_read_id)
+     SELECT id, 'global', ? FROM users WHERE role != 'guest'
+     ON CONFLICT DO NOTHING`
+  ).run(maxMsg);
+  db.prepare(
+    `INSERT INTO chat_reads (user_id, room, last_read_id)
+     SELECT id, 'managers', ? FROM users WHERE role IN ('manager','leader','coleader','professor')
+     ON CONFLICT DO NOTHING`
+  ).run(maxMsg);
+  db.prepare(
+    `INSERT INTO chat_reads (user_id, room, last_read_id)
+     SELECT DISTINCT u.id, 'dept:' || t.id, ?
+     FROM users u JOIN departments t ON t.id = u.department_id
+     WHERE u.role IN ('manager','member')
+     ON CONFLICT DO NOTHING`
+  ).run(maxMsg);
+}
+
+module.exports = db;
