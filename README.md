@@ -233,6 +233,13 @@ These accounts exist **only** in the demo seed (`ISIGK_DEMO_ACCOUNTS` unset). Pr
 
 ## 17. 📜 Decisions log
 
+**2026-10-17 — PRODUCTION READY: demo data cleared, pushed to GitHub**
+- **Repo**: https://github.com/med-tlili/robotic_club (`main`, 68 files: `platform/` server+client incl. the built `client/dist`, `rapport/` LaTeX+PDF, root README). **Never committed**: `club.db*`, `uploads/`, `backups/`, `node_modules/`, `.jwt-secret` (git-ignored). Author set to the GitHub noreply address (account email-privacy protection)
+- **`npm start` is now the production entry** (`start-prod.js`): seeds **nothing but the 5 departments** (`ISIGK_DEMO_ACCOUNTS=0`) and generates a persistent random `JWT_SECRET` → `.jwt-secret` on first boot (overridable via env). `npm run start:demo` keeps the seeded demo for local play
+- **Deploy = 3 commands**: clone → `cd platform/server && npm install && npm start` → open `/signup` as the Professor. README §13 documents it
+- **Local machine cleared for the transition**: the demo DB + test media were *moved* (not deleted) to `platform/server/club-demo-backup.db` / `uploads-demo-backup/` — restore by moving them back and running `npm run start:demo`. The local server now runs in production mode: empty club, open professor sign-up, Drive backups still connected
+- **Verified on the production instance**: 5 departments · 0 users/posts/messages/events · public API serves departments · professor sign-up works on the empty DB · probe account removed, DB pristine
+
 **2026-10-17 — Google Drive backups CONNECTED to the real account (live)**
 - **Setup done**: the club's dedicated Google account was created, `rclone config create gdrive drive scope=drive` + one browser consent (`rclone about gdrive:`) — token + refresh token saved in `rclone.conf`, no server env needed (default remote `gdrive:ISIGK-Club-Backups` matches). The Storage page's setup panel disappears automatically once the remote answers
 - **First real backup**: leader clicked *Run backup now* → `club.db` + all `uploads/` (public + private + thumbs, 14 files / 2 MB) landed in **`ISIGK-Club-Backups/2026-10/`** · Storage page shows the true quota (**2 MB of 15 GB — "Healthy"**) · *"Last backup 17/10/2026 01:27:44 — ok"* · month row *2026-10 · 2 MB · 14* · Dashboard warn banner correctly absent at 0%
