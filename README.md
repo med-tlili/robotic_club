@@ -182,6 +182,22 @@ That's it — the UI build (`client/dist`) is committed. Then:
 
 Notes: the database and `uploads/` appear next to the server on first run — **back them up** (the Drive panel does this automatically once rclone is configured on the host) · the server serves the API + the UI on one port (`PORT`, default 4000) · rebuild the UI only after changing client code: `cd platform/client && npm install && npm run build`. Local demo with seeded accounts: `npm run start:demo`.
 
+### 📡 No hosting? YOUR PC is the server (members connect over WiFi)
+
+Every member can use the site from their own computer/phone **on the same network** (school or home WiFi) — no cloud host needed:
+
+1. **Start it** — double-click `START-SERVER.bat` in the project folder (first run installs dependencies, then the server starts and prints `📡 Club members open: http://…:4000`). Leave that window open.
+2. **Firewall (once, as Administrator):**
+   ```powershell
+   New-NetFirewallRule -DisplayName "ISIGK Club - port 4000" -Direction Inbound -Protocol TCP -LocalPort 4000 -Action Allow -Profile Any
+   ```
+3. **Members open** the printed address, e.g. `http://192.168.1.11:4000` (find it anytime with `ipconfig` → *IPv4 Address* under your WiFi adapter).
+
+Rules of this mode:
+- Your PC must be **on with the server window open** while others use it.
+- The IP is assigned by your router and can change after a reboot → in the router's **DHCP settings, reserve** the address for this PC so the club link never breaks.
+- Everyone must be on the **same network**. Members at home on mobile data/other WiFi can't reach it directly — if the club needs that, add a tunnel (Tailscale gives every member a fixed private address for free; Cloudflare tunnel gives a public link). Ask and it can be wired up.
+
 ## 14. 🔑 Demo accounts (password: `password123`)
 
 | Email | Role |
@@ -232,6 +248,13 @@ These accounts exist **only** in the demo seed (`ISIGK_DEMO_ACCOUNTS` unset). Pr
 ---
 
 ## 17. 📜 Decisions log
+
+**2026-10-17 — MEMBER ACCESS MODE: the Professor's PC IS the server (no cloud hosting)**
+- Decision: no web host — the club laptop runs `START-SERVER.bat` (double-click → dependency check → `npm start`) and members open `http://<LAN-IP>:4000` from their own PCs/phones on the same WiFi
+- Firewall: inbound TCP 4000 allowed via the `ISIGK Club - port 4000` rule (added as admin) · startup now prints every LAN address (`📡 Club members open: …`)
+- Verified: `http://192.168.1.11:4000` → **HTTP 200** from the machine (Wi-Fi adapter address)
+- Trade-offs accepted: the laptop must stay on/running the app; the DHCP address can change (reserve it in the router); same-network only — internet-wide access (members at home) would need a tunnel (Tailscale/Cloudflare), offered but not built
+- `192.168.56.1` in the log is the VirtualBox adapter — members get the `192.168.1.x` address
 
 **2026-10-17 — PRODUCTION READY: demo data cleared, pushed to GitHub**
 - **Repo**: https://github.com/med-tlili/robotic_club (`main`, 68 files: `platform/` server+client incl. the built `client/dist`, `rapport/` LaTeX+PDF, root README). **Never committed**: `club.db*`, `uploads/`, `backups/`, `node_modules/`, `.jwt-secret` (git-ignored). Author set to the GitHub noreply address (account email-privacy protection)

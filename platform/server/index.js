@@ -119,4 +119,12 @@ if (fs.existsSync(path.join(clientDist, 'index.html'))) {
 }
 
 const PORT = process.env.PORT || 4000;
-server.listen(PORT, () => console.log(`🤖 ISIGK Robotics API running on http://localhost:${PORT}`));
+server.listen(PORT, () => {
+  console.log(`🤖 ISIGK Robotics API running on http://localhost:${PORT}`);
+  // show addresses other devices on the same network can use to reach the club
+  const addrs = Object.values(require('os').networkInterfaces())
+    .flat()
+    .filter((n) => n && n.family === 'IPv4' && !n.internal)
+    .map((n) => `http://${n.address}:${PORT}`);
+  if (addrs.length) console.log(`📡 Club members open: ${addrs.join('   or   ')}`);
+});
