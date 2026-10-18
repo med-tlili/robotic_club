@@ -8,7 +8,7 @@ import { useAuth } from '../auth';
 import { api } from '../api';
 import { isBoss, DEPT_LABELS } from '../roles';
 import { Panel, Skeleton, RolePill, Avatar, DeptIcon } from '../components/ui';
-import ProfessorGraphs from '../components/ProfessorGraphs';
+import SupervisorGraphs from '../components/SupervisorGraphs';
 
 /* ============================================================
    Role-aware dashboard — answers "what needs my attention?"
@@ -60,7 +60,7 @@ export default function Dashboard() {
 }
 
 /* ---------- shared bits ---------- */
-/* Drive-backups limit alert (Leader / Co-Leader / Professor) */
+/* Drive-backups limit alert (Leader / Co-Leader / Supervisor) */
 function StorageAlertBanner() {
   const [st, setSt] = useState(null);
   useEffect(() => { api('/storage').then(setSt).catch(() => {}); }, []);
@@ -144,7 +144,7 @@ function MyTasksPanel({ user, tasks }) {
   );
 }
 
-/* latest announcements of a department */
+/* latest posts of a department */
 function RecentPosts({ dept, limit = 3 }) {
   const [posts, setPosts] = useState(null);
   useEffect(() => {
@@ -159,7 +159,7 @@ function RecentPosts({ dept, limit = 3 }) {
     >
       {posts === null ? <Skeleton h={90} /> : posts.length === 0 ? (
         <p className="text-dim text-sm" style={{ margin: 0 }}>
-          No announcements yet from the {DEPT_LABELS[dept.slug] || dept.name} team.
+          No posts yet from the {DEPT_LABELS[dept.slug] || dept.name} team.
         </p>
       ) : (
         <div className="list">
@@ -168,7 +168,7 @@ function RecentPosts({ dept, limit = 3 }) {
               <Megaphone size={14} className="text-faint" />
               <div className="grow">
                 <div className="name">{p.title}</div>
-                <div className="meta">{p.author.full_name} · {p.yes} yes / {p.no} no</div>
+                <div className="meta">{p.author.full_name} · Yes {p.yes} · Maybe {p.maybe} · No {p.no}</div>
               </div>
             </Link>
           ))}
@@ -184,8 +184,11 @@ function UpcomingEvents({ limit = 4 }) {
   useEffect(() => {
     api('/events').then(setEvents).catch(() => setEvents([]));
   }, []);
-  const today = new Date().toISOString().slice(0, 10);
-  const upcoming = (events || []).filter((e) => e.event_date >= today).slice(0, limit);
+  // local date (not UTC — the Calendar page uses the same convention)
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  // multi-day events stay "upcoming" until their last day
+  const upcoming = (events || []).filter((e) => (e.end_date || e.event_date) >= today).slice(0, limit);
 
   return (
     <Panel
@@ -205,7 +208,7 @@ function UpcomingEvents({ limit = 4 }) {
               <div className="grow">
                 <div className="name">{ev.title}</div>
                 <div className="meta">
-                  {ev.event_date}
+                  {ev.end_date && ev.end_date > ev.event_date ? `${ev.event_date} → ${ev.end_date}` : ev.event_date}
                   {ev.event_time ? ` · ${ev.event_time}` : ''}
                   {ev.location ? ` · ${ev.location}` : ''}
                 </div>
@@ -256,7 +259,7 @@ function ApplicationsPanel({ user }) {
   };
   useEffect(load, []);
 
-  const canReview = user.role !== 'professor'; // API enforces manager-dept / boss rules
+  const canReview = user.role !== 'supervisor'; // API enforces manager-dept / boss rules
   const act = (id, action) => {
     api(`/applications/${id}/${action}`, { method: 'POST' })
       .then(load)
@@ -382,20 +385,20 @@ function ManagerDashboard({ user, departments, goals, members, tasks }) {
   );
 }
 
-/* ---------- Leader / Co-leader / Professor ---------- */
+/* ---------- Leader / Co-leader / Supervisor ---------- */
 function BossDashboard({ user, departments, goals, members }) {
   if (!departments || !goals || members === null) return <Skeleton h={400} />;
   const active = departments.filter((d) => !d.coming_soon);
   const realMembers = members.filter((m) => m.role !== 'guest');
-  const professor = user.role === 'professor';
+  const supervisor = user.role === 'supervisor';
 
   return (
     <div className="stack">
       <div className="page-head">
         <div>
-          <h1>{professor ? 'Club overview' : 'Lead the club'}</h1>
+          <h1>{supervisor ? 'Club overview' : 'Lead the club'}</h1>
           <div className="sub">
-            {professor
+            {supervisor
               ? 'Supervisor view — read-only access to all departments, chats and reports'
               : `${active.length} active departments · ${realMembers.length} members · assign goals and manage roles`}
           </div>
@@ -405,7 +408,7 @@ function BossDashboard({ user, departments, goals, members }) {
           <Link to="/members" className="btn secondary sm">
             <Users size={13} /> Members
           </Link>
-          {professor && (
+          {supervisor && (
             <Link to="/reports" className="btn sm">
               <FileDown size={13} /> Reports
             </Link>
@@ -417,7 +420,7 @@ function BossDashboard({ user, departments, goals, members }) {
       <ApplicationsPanel user={user} />
       <StorageAlertBanner />
 
-      {professor && <ProfessorGraphs />}
+      {supervisor && <SupervisorGraphs />}
 
       <div className="grid-2">
         <UpcomingEvents />
@@ -462,7 +465,7 @@ function BossDashboard({ user, departments, goals, members }) {
         <Panel title="Goals across departments" icon={Target}>
           {goals.length === 0 ? (
             <p className="text-dim text-sm" style={{ margin: 0 }}>
-              {professor ? 'No goals set yet.' : 'No goals defined yet. Open a department to assign the first goal to a team.'}
+              {supervisor ? 'No goals set yet.' : 'No goals defined yet. Open a department to assign the first goal to a team.'}
             </p>
           ) : (
             <div className="list">
@@ -483,7 +486,7 @@ function BossDashboard({ user, departments, goals, members }) {
           )}
         </Panel>
 
-        {professor ? (
+        {supervisor ? (
           <Panel title="Reports" icon={FileDown}
             action={<Link to="/reports" className="panel-action">Open <ArrowRight size={12} /></Link>}>
             <p className="text-dim text-sm" style={{ margin: 0 }}>
@@ -594,7 +597,7 @@ function GuestDashboard() {
     <div className="stack">
       <div className="page-head">
         <div>
-          <h1>ISIGK Robotics Club</h1>
+          <h1>{user.club?.name || 'Robotics Club'}</h1>
           <div className="sub">Public view — see what the club does and apply to join</div>
         </div>
       </div>
@@ -665,7 +668,7 @@ function GuestDashboard() {
                 <DeptIcon slug={slug} size={30} />
                 <div className="grow">
                   <div className="name">{name}</div>
-                  <div className="meta">Public announcements</div>
+                  <div className="meta">Public posts</div>
                 </div>
                 <ArrowRight size={15} className="text-faint" />
               </Link>

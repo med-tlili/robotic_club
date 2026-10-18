@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 
 export const ROLE_LABELS = {
-  professor: 'Professor',
+  supervisor: 'Supervisor',
   leader: 'Leader',
   coleader: 'Co-Leader',
   manager: 'Manager',
@@ -14,7 +14,7 @@ export const ROLE_LABELS = {
 };
 
 export const ROLE_COLORS = {
-  professor: 'var(--role-professor)',
+  supervisor: 'var(--role-supervisor)',
   leader: 'var(--role-leader)',
   coleader: 'var(--role-coleader)',
   manager: 'var(--role-manager)',
@@ -24,7 +24,7 @@ export const ROLE_COLORS = {
 
 // compact icon per role (for pills / lists)
 export const ROLE_ICONS = {
-  professor: Eye,
+  supervisor: Eye,
   leader: Crown,
   coleader: ShieldCheck,
   manager: UserCog,
@@ -32,8 +32,8 @@ export const ROLE_ICONS = {
   guest: User,
 };
 
-export const isBoss = (role) => ['professor', 'leader', 'coleader'].includes(role);
-// management powers (roles, departments, removal) — Professor is read-only
+export const isBoss = (role) => ['supervisor', 'leader', 'coleader'].includes(role);
+// management powers (roles, departments, removal) — Supervisor is read-only
 export const isLeader = (role) => ['leader', 'coleader'].includes(role);
 
 // ---------- Departments ----------

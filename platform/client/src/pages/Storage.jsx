@@ -18,7 +18,7 @@ const fmtWhen = (iso) => {
 };
 
 /* ============================================================
-   Storage — Drive backups for the Leader/Co-Leader (Professor
+   Storage — Drive backups for the Leader/Co-Leader (Supervisor
    read-only): real quota with amber/red limit alerts, monthly
    snapshots, and safe pruning (backup copies only — the live
    site is never touched).
@@ -30,7 +30,7 @@ export default function Storage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const load = () => api('/storage').then(setSt).catch((e) => setError(e.message));
+  const load = () => { setError(''); api('/storage').then(setSt).catch((e) => setError(e.message)); };
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runSync = async () => {
@@ -50,6 +50,18 @@ export default function Storage() {
   };
 
   if (!st) {
+    // initial load failed — show the error with a retry instead of an
+    // endless skeleton
+    if (error) {
+      return (
+        <section className="section">
+          <div className="banner error row" style={{ gap: 10 }}>
+            <span className="grow">{error}</span>
+            <button className="btn sm secondary" onClick={load}>Retry</button>
+          </div>
+        </section>
+      );
+    }
     return (
       <section className="section">
         <Skeleton h={18} w={220} />

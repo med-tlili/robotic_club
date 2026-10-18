@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node start-prod.js",
     "start:demo": "node index.js",
+    "test": "node --test test/*.test.js",
     "backup": "node backup.js",
     "sync-drive": "node sync-drive.js"
   },

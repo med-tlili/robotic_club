@@ -1,6 +1,6 @@
 // ============================================================
-//  routes/reports.js — Professor-only club reports
-//  README: "Professor downloads reports (monthly global, full
+//  routes/reports.js — Supervisor-only club reports
+//  README: "Supervisor downloads reports (monthly global, full
 //  year, per dept)". Aggregates real data; PDF via pdfkit.
 // ============================================================
 const express = require('express');
@@ -10,10 +10,10 @@ const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
 
-// only the Professor may pull reports
-function requireProfessor(req, res, next) {
-  if (req.user.role !== 'professor') {
-    return res.status(403).json({ error: 'Only the Professor can access reports' });
+// only the Supervisor may pull reports
+function requireSupervisor(req, res, next) {
+  if (req.user.role !== 'supervisor') {
+    return res.status(403).json({ error: 'Only the Supervisor can access reports' });
   }
   next();
 }
@@ -46,29 +46,36 @@ function periodRange(query) {
 }
 
 // ---------- aggregation ----------
-async function buildReport(query) {
+async function buildReport(query, clubId) {
   const { year, month, label, start, end } = periodRange(query);
   const deptId = Number(query.department_id) || null;
-  const dept = deptId ? await db.prepare('SELECT id, name, slug FROM departments WHERE id = ?').get(deptId) : null;
+  const dept = deptId
+    ? await db.prepare('SELECT id, name, slug FROM departments WHERE id = ? AND club_id = ?').get(deptId, clubId)
+    : null;
+  if (deptId && !dept) return null; // requested department is not part of this club
+  const scopedDept = dept ? dept.id : null;
 
-  // SQL fragment: restrict to one department when requested
-  const inDept = (col) => (deptId ? `${col} = ${deptId}` : '1=1');
+  // SQL fragment: restrict to one department when requested, otherwise to the
+  // club's own departments (tenant isolation)
+  const inDept = (col) => (scopedDept
+    ? `${col} = ${scopedDept}`
+    : `${col} IN (SELECT id FROM departments WHERE club_id = ${Number(clubId)})`);
 
   const one = async (sql, ...p) => await db.prepare(sql).get(...p);
   const all = async (sql, ...p) => await db.prepare(sql).all(...p);
 
   // members
-  const membersTotal = (await one('SELECT COUNT(*) c FROM users WHERE role != \'guest\'')).c;
-  const membersInDept = deptId
-    ? (await one("SELECT COUNT(*) c FROM users WHERE role != 'guest' AND department_id = ?", deptId)).c
+  const membersTotal = (await one("SELECT COUNT(*) c FROM users WHERE role != 'guest' AND club_id = ?", clubId)).c;
+  const membersInDept = scopedDept
+    ? (await one("SELECT COUNT(*) c FROM users WHERE role != 'guest' AND department_id = ?", scopedDept)).c
     : membersTotal;
   const membersByRole = await all(
-    `SELECT role, COUNT(*) c FROM users WHERE role != 'guest' ${deptId ? 'AND department_id = ?' : ''} GROUP BY role`,
-    ...(deptId ? [deptId] : []),
+    `SELECT role, COUNT(*) c FROM users WHERE role != 'guest' AND club_id = ? ${scopedDept ? 'AND department_id = ?' : ''} GROUP BY role`,
+    clubId, ...(scopedDept ? [scopedDept] : []),
   );
   const newMembers = (await one(
-    `SELECT COUNT(*) c FROM users WHERE role != 'guest' AND created_at >= ? AND created_at < ? ${deptId ? 'AND department_id = ?' : ''}`,
-    start, end, ...(deptId ? [deptId] : []),
+    `SELECT COUNT(*) c FROM users WHERE role != 'guest' AND club_id = ? AND created_at >= ? AND created_at < ? ${scopedDept ? 'AND department_id = ?' : ''}`,
+    clubId, start, end, ...(scopedDept ? [scopedDept] : []),
   )).c;
 
   // posts + engagement
@@ -93,8 +100,8 @@ async function buildReport(query) {
 
   // events are club-wide (the calendar is owned by the Leader, not per-department)
   const events = (await one(
-    'SELECT COUNT(*) c FROM events WHERE event_date >= ? AND event_date < ?',
-    start, end,
+    'SELECT COUNT(*) c FROM events WHERE club_id = ? AND event_date >= ? AND event_date < ?',
+    clubId, start, end,
   )).c;
 
   // tasks
@@ -126,10 +133,10 @@ async function buildReport(query) {
 
   // chat activity (group scopes; private excluded from the count)
   const messages = (await one(
-    `SELECT COUNT(*) c FROM messages WHERE scope IN ('global','managers','dept')
-     ${deptId ? 'AND (department_id = ? OR scope IN (\'global\',\'managers\'))' : ''}
+    `SELECT COUNT(*) c FROM messages WHERE scope IN ('global','managers','dept') AND club_id = ?
+     ${scopedDept ? 'AND (department_id = ? OR scope IN (\'global\',\'managers\'))' : ''}
      AND created_at >= ? AND created_at < ?`,
-    ...(deptId ? [deptId] : []), start, end,
+    clubId, ...(scopedDept ? [scopedDept] : []), start, end,
   )).c;
 
   return {
@@ -148,12 +155,15 @@ async function buildReport(query) {
 }
 
 // ---------- GET /api/reports/data — JSON preview ----------
-router.get('/data', authenticate, requireProfessor, async (req, res) => {
-  res.json(await buildReport(req.query));
+router.get('/data', authenticate, requireSupervisor, async (req, res) => {
+  const r = await buildReport(req.query, req.user.club_id);
+  if (!r) return res.status(404).json({ error: 'Department not found in this club' });
+  res.json(r);
 });
 
-// ---------- GET /api/reports/charts — dashboard graphs (professor) ----------
-router.get('/charts', authenticate, requireProfessor, async (req, res) => {
+// ---------- GET /api/reports/charts — dashboard graphs (supervisor) ----------
+router.get('/charts', authenticate, requireSupervisor, async (req, res) => {
+  const clubId = req.user.club_id;
   const now = new Date();
   const year = Number(req.query.year) || now.getUTCFullYear();
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -163,8 +173,8 @@ router.get('/charts', authenticate, requireProfessor, async (req, res) => {
     const mm = String(i + 1).padStart(2, '0');
     const next = i === 11 ? `${year + 1}-01-01` : `${year}-${String(i + 2).padStart(2, '0')}-01`;
     const c = (await db.prepare(
-      'SELECT COUNT(*) c FROM posts WHERE created_at >= ? AND created_at < ?',
-    ).get(`${year}-${mm}-01`, next)).c;
+      'SELECT COUNT(*) c FROM posts WHERE department_id IN (SELECT id FROM departments WHERE club_id = ?) AND created_at >= ? AND created_at < ?',
+    ).get(clubId, `${year}-${mm}-01`, next)).c;
     return { label, value: c };
   }));
 
@@ -173,35 +183,36 @@ router.get('/charts', authenticate, requireProfessor, async (req, res) => {
     const mm = String(i + 1).padStart(2, '0');
     const next = i === 11 ? `${year + 1}-01-01` : `${year}-${String(i + 2).padStart(2, '0')}-01`;
     const c = (await db.prepare(
-      "SELECT COUNT(*) c FROM messages WHERE scope IN ('global','managers','dept') AND created_at >= ? AND created_at < ?",
-    ).get(`${year}-${mm}-01`, next)).c;
+      "SELECT COUNT(*) c FROM messages WHERE scope IN ('global','managers','dept') AND club_id = ? AND created_at >= ? AND created_at < ?",
+    ).get(clubId, `${year}-${mm}-01`, next)).c;
     return { label, value: c };
   }));
 
-  const tasksByStatus = await Promise.all(['todo', 'in_progress', 'done'].map(async (status) => ({
+  const tasksByStatus = await Promise.all(['todo', 'doing', 'done'].map(async (status) => ({
     label: status.replace('_', ' '),
-    value: (await db.prepare('SELECT COUNT(*) c FROM tasks WHERE status = ?').get(status)).c,
+    value: (await db.prepare('SELECT COUNT(*) c FROM tasks WHERE department_id IN (SELECT id FROM departments WHERE club_id = ?) AND status = ?').get(clubId, status)).c,
   })));
 
   const membersByRole = await db.prepare(
-    "SELECT role AS label, COUNT(*) AS value FROM users WHERE role != 'guest' GROUP BY role ORDER BY value DESC",
-  ).all();
+    "SELECT role AS label, COUNT(*) AS value FROM users WHERE role != 'guest' AND club_id = ? GROUP BY role ORDER BY value DESC",
+  ).all(clubId);
 
   const postsByType = await db.prepare(
-    'SELECT type AS label, COUNT(*) AS value FROM posts GROUP BY type ORDER BY value DESC',
-  ).all();
+    'SELECT type AS label, COUNT(*) AS value FROM posts WHERE department_id IN (SELECT id FROM departments WHERE club_id = ?) GROUP BY type ORDER BY value DESC',
+  ).all(clubId);
 
   const applications = await Promise.all(['accepted', 'refused', 'pending'].map(async (status) => ({
     label: status,
-    value: (await db.prepare('SELECT COUNT(*) c FROM applications WHERE status = ?').get(status)).c,
+    value: (await db.prepare('SELECT COUNT(*) c FROM applications WHERE department_id IN (SELECT id FROM departments WHERE club_id = ?) AND status = ?').get(clubId, status)).c,
   })));
 
   res.json({ year, postsByMonth, messagesByMonth, tasksByStatus, membersByRole, postsByType, applications });
 });
 
 // ---------- GET /api/reports/pdf — downloadable PDF ----------
-router.get('/pdf', authenticate, requireProfessor, async (req, res) => {
-  const r = await buildReport(req.query);
+router.get('/pdf', authenticate, requireSupervisor, async (req, res) => {
+  const r = await buildReport(req.query, req.user.club_id);
+  if (!r) return res.status(404).json({ error: 'Department not found in this club' });
   const doc = new PDFDocument({ margin: 50, size: 'A4' });
   const filename = `isigk-report-${r.scope.toLowerCase().replace(/\s+/g, '-')}-${r.label.toLowerCase().replace(/\s+/g, '-')}.pdf`;
   res.setHeader('Content-Type', 'application/pdf');

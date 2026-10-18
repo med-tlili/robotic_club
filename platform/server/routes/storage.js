@@ -1,6 +1,6 @@
 // ============================================================
 //  routes/storage.js — Drive backups: status, manual sync, pruning
-//  View:  Leader / Co-Leader / Professor (read-only for the Professor)
+//  View:  Leader / Co-Leader / Supervisor (read-only for the Supervisor)
 //  Act:   Leader / Co-Leader only (run backup, clear a month)
 // ============================================================
 const express = require('express');
@@ -12,11 +12,16 @@ const router = express.Router();
 const BOSS = ['leader', 'coleader'];
 
 // GET /api/storage — panel state (quota, months, last sync)
+// NOTE: 500s here return a generic message (details are logged server-side)
+// — raw error strings can embed rclone stderr, filesystem paths or env info.
 router.get('/', authenticate, (req, res) => {
-  if (![...BOSS, 'professor'].includes(req.user.role)) {
-    return res.status(403).json({ error: 'Storage is for club leaders and the professor' });
+  if (![...BOSS, 'supervisor'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Storage is for club leaders and the supervisor' });
   }
-  drive.status().then((s) => res.json(s)).catch((e) => res.status(500).json({ error: e.message }));
+  drive.status().then((s) => res.json(s)).catch((e) => {
+    console.error('[storage] status failed:', e);
+    res.status(500).json({ error: 'Could not read the backup status — see the server log' });
+  });
 });
 
 // POST /api/storage/sync — run a backup now (Leader / Co-Leader)
@@ -27,7 +32,8 @@ router.post('/sync', authenticate, async (req, res) => {
   try {
     res.json(await drive.syncNow(req.user));
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[storage] sync failed:', e);
+    res.status(500).json({ error: 'Backup failed — check the backup configuration and see the server log' });
   }
 });
 
@@ -39,6 +45,7 @@ router.post('/months/:month/clear', authenticate, async (req, res) => {
   try {
     res.json(await drive.clearMonth(req.params.month));
   } catch (e) {
+    // validation-style failure (bad month / not backed up) — message is safe
     res.status(400).json({ error: e.message });
   }
 });
@@ -62,7 +69,8 @@ router.get('/cron-sync', async (req, res) => {
     const st = await drive.syncNow(null); // no user → no notification spam
     res.json({ synced: true, month, alert: st.alert });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[storage] cron sync failed:', e);
+    res.status(500).json({ error: 'Backup failed — see the server log' });
   }
 });
 

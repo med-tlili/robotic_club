@@ -1,7 +1,36 @@
 // Shared UI building blocks
+import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Inbox, Wrench } from 'lucide-react';
 import { ROLE_LABELS, ROLE_COLORS, DEPT_ICONS } from '../roles';
+
+/* Accessible-modal helper: attach the returned ref to the dialog element
+   (role="dialog" aria-modal="true"). Focuses the first field on open,
+   closes on Escape (unless busy), restores focus on close. */
+export function useModal(onClose, busy = false) {
+  const ref = useRef(null);
+  const last = useRef(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+
+  useEffect(() => {
+    last.current = document.activeElement;
+    const focusable = ref.current?.querySelectorAll(
+      'input:not([type="hidden"]), select, textarea, button:not([disabled]), a[href]',
+    );
+    focusable?.[0]?.focus();
+    const onKey = (e) => { if (e.key === 'Escape' && !busyRef.current) closeRef.current(); };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      last.current?.focus?.();
+    };
+  }, []);
+
+  return ref;
+}
 
 /* Avatar with initials, tinted by role */
 export function Avatar({ user, size = '' }) {

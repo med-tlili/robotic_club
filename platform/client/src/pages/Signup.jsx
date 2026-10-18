@@ -1,21 +1,20 @@
 import { useState } from 'react';
 import { useNavigate, Navigate, Link } from 'react-router-dom';
-import { Bot, UserPlus } from 'lucide-react';
+import { Bot, Building2 } from 'lucide-react';
 import { useAuth } from '../auth';
 import { api } from '../api';
 
 /* ============================================================
-   Professor sign-up — OPEN to everyone, at any time (user
-   decision): fill the form, get a Professor account, you're in.
-
-   The chain stays manual inside the app: the Professor creates
-   the Leader from the Members page, the Leader creates the
-   rest.
+   Create the club — the first page's second action.
+   Anyone can create their OWN club here: the server makes you its
+   first Supervisor and gives the club its starter departments.
+   Accounts inside the club are then created by the chain
+   Supervisor → Leader → everyone else (Members page).
    ============================================================ */
 export default function Signup() {
   const { user, signIn, loading } = useAuth();
   const nav = useNavigate();
-  const [form, setForm] = useState({ full_name: '', email: '', password: '' });
+  const [form, setForm] = useState({ club_name: '', full_name: '', email: '', password: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -35,10 +34,12 @@ export default function Signup() {
     setError('');
     setBusy(true);
     try {
-      const data = await api('/auth/signup-professor', { method: 'POST', body: form });
+      const data = await api('/auth/create-club', { method: 'POST', body: form });
       signIn(data.token, data.user);
       nav('/');
-    } catch (err) { setError(err.message); }
+    } catch (err) {
+      setError(err.message);
+    }
     finally { setBusy(false); }
   };
 
@@ -48,15 +49,23 @@ export default function Signup() {
         <div className="login-brand">
           <div className="mark"><Bot size={20} /></div>
           <div>
-            <h1>ISIGK Robotics Club</h1>
-            <p>Create the Professor account</p>
+            <h1>Create your club</h1>
+            <p>You become its first Supervisor</p>
           </div>
         </div>
 
         <form className="login-form" onSubmit={submit}>
           {error && <div className="banner error">{error}</div>}
           <div className="field">
-            <label htmlFor="su-name">Full name</label>
+            <label htmlFor="su-club">Club name</label>
+            <input
+              id="su-club" className="input" autoComplete="organization"
+              placeholder="e.g. ISIGK Robotics Club"
+              value={form.club_name} onChange={set('club_name')} required
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="su-name">Your full name</label>
             <input
               id="su-name" className="input" autoComplete="name"
               placeholder="e.g. Pr. Ahmed Supervisor"
@@ -67,7 +76,7 @@ export default function Signup() {
             <label htmlFor="su-email">Email</label>
             <input
               id="su-email" className="input" type="email" autoComplete="email"
-              placeholder="you@isigk.tn"
+              placeholder="you@example.tn"
               value={form.email} onChange={set('email')} required
             />
           </div>
@@ -80,12 +89,15 @@ export default function Signup() {
             />
           </div>
           <button className="btn" type="submit" disabled={busy} style={{ width: '100%' }}>
-            <UserPlus size={15} /> {busy ? 'Creating…' : 'Sign up as Professor'}
+            <Building2 size={15} /> {busy ? 'Creating…' : 'Create the club'}
           </button>
         </form>
 
         <div className="text-dim text-xs" style={{ textAlign: 'center', marginTop: 12 }}>
-          You become the club's Professor, then create the Leader from the Members page.
+          You become the club's <strong>Supervisor</strong>; you then create the Leader from
+          the Members page and the club fills up from there.
+          <br />
+          By creating a club you agree to the <Link to="/terms">Terms &amp; Privacy</Link>.
           <br />
           Already have an account? <Link to="/login">Sign in</Link>
         </div>

@@ -10,7 +10,7 @@ import { Skeleton, DeptIcon, ToolBlock, Avatar } from '../components/ui';
 import PostFeed from '../components/PostFeed';
 import AlbumsGallery from '../components/AlbumsGallery';
 import TasksPanel from '../components/TasksPanel';
-import { HrTools, MediaTools, EventsTools, FinanceTools } from '../components/DeptTools';
+import { HrTools, AlbumTools, EventsTools, FinanceTools } from '../components/DeptTools';
 
 /* ============================================================
    Department page = PUBLIC home + PRIVATE workspace, in that
@@ -24,19 +24,27 @@ export default function DepartmentHome() {
   const [dept, setDept] = useState(null);
   const [error, setError] = useState('');
 
-  useEffect(() => {
+  const load = () => {
     setDept(null);
-    const q = user.role === 'guest' ? '?guest=1' : '';
-    api(`/departments/${slug}${q}`).then(setDept).catch((e) => setError(e.message));
-  }, [slug, user]);
+    setError('');
+    api(`/departments/${slug}`).then(setDept).catch((e) => setError(e.message));
+  };
+  useEffect(load, [slug]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (error) return <div className="banner error">{error}</div>;
-  if (!dept) return <Skeleton h={420} />;
+  if (!dept && !error) return <Skeleton h={420} />;
+  if (!dept && error) {
+    return (
+      <div className="banner error row" style={{ gap: 10 }}>
+        <span className="grow">{error}</span>
+        <button className="btn sm secondary" onClick={load}>Retry</button>
+      </div>
+    );
+  }
 
   if (dept.coming_soon) return <ComingSoon slug={slug} />;
 
   const inDept = user.department_id === dept.id;
-  const boss = isBoss(user.role); // professor included → read-only view of everything
+  const boss = isBoss(user.role); // supervisor included → read-only view of everything
   const canPrivate = inDept || boss;
   const label = DEPT_LABELS[dept.slug] || dept.name;
   const meta = DEPT_INFO[dept.slug] || {};
@@ -60,7 +68,7 @@ export default function DepartmentHome() {
           <>
             <Megaphone size={13} />
             <span>
-              The {meta.feedNoun || 'announcements'} below are <strong style={{ color: 'var(--text)' }}>public</strong> — the whole club
+              The {meta.feedNoun || 'posts'} below are <strong style={{ color: 'var(--text)' }}>public</strong> — the whole club
               and guests can read them. The workspace further down is <strong style={{ color: 'var(--text)' }}>private</strong> to the {label} team.
             </span>
           </>
@@ -74,8 +82,8 @@ export default function DepartmentHome() {
         )}
       </p>
 
-      {/* Media albums — first thing on the page, browsable by every club member */}
-      {dept.slug === 'media' && user.role !== 'guest' && <AlbumsGallery />}
+      {/* Photo albums — first thing on the page, browsable by every club member */}
+      {user.role !== 'guest' && <AlbumsGallery dept={dept} />}
 
       {/* public feed */}
       <PostFeed dept={dept} />
@@ -92,7 +100,7 @@ export default function DepartmentHome() {
           <div className="panel ws">
             {dept.slug === 'hr' && <HrTools dept={dept} />}
             {dept.slug === 'events' && <EventsTools dept={dept} />}
-            {dept.slug === 'media' && <MediaTools dept={dept} />}
+            <AlbumTools dept={dept} />
             {dept.slug === 'finance' && <FinanceTools dept={dept} />}
 
             <TasksPanel dept={dept} />
@@ -190,18 +198,18 @@ function ComingSoon({ slug }) {
 const DEPT_INFO = {
   hr: {
     purpose: 'Members, attendance and discipline. HR keeps the member roster, marks who attends each meeting, records what was decided, and logs rule breaks.',
-    feedNoun: 'announcements',
+    feedNoun: 'posts',
   },
   events: {
     purpose: 'Planning club events from idea to decoration — itineraries, journeys and stand setup.',
-    feedNoun: 'event announcements',
+    feedNoun: 'posts',
   },
   media: {
     purpose: 'Clips, albums and the club’s social presence — review clips here before they go out.',
-    feedNoun: 'clips',
+    feedNoun: 'posts',
   },
   finance: {
     purpose: 'Sponsor partnerships and budget. Publish offers for the club to vote on, track sponsors from lead to won, and record income and expenses.',
-    feedNoun: 'sponsor offers',
+    feedNoun: 'posts',
   },
 };

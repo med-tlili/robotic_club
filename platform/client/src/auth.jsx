@@ -12,7 +12,9 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (!getToken()) { setLoading(false); return; }
     api('/auth/me').then((u) => { setUser(u); connectSocket(); })
-      .catch(() => localStorage.removeItem('token'))
+      // only a rejected token destroys the session — a transient network
+      // failure keeps it so the user is not logged out by a flaky wifi
+      .catch((e) => { if (e.status === 401) localStorage.removeItem('token'); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -38,5 +40,12 @@ export function AuthProvider({ children }) {
     return user;
   };
 
-  return <AuthContext.Provider value={{ user, login, signIn, logout, loading }}>{children}</AuthContext.Provider>;
+  // re-read the current user from the server (after a profile edit)
+  const refreshUser = async () => {
+    const u = await api('/auth/me');
+    setUser(u);
+    return u;
+  };
+
+  return <AuthContext.Provider value={{ user, login, signIn, logout, refreshUser, loading }}>{children}</AuthContext.Provider>;
 }

@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, Navigate, Link } from 'react-router-dom';
 import { Bot, LogIn, UserPlus, ChevronRight } from 'lucide-react';
 import { useAuth } from '../auth';
+import { api } from '../api';
 import { ROLE_LABELS, ROLE_COLORS } from '../roles';
 
+// Seeded demo accounts — only shown when the server reports demo mode
+// (production installs set ISIGK_DEMO_ACCOUNTS=0 and never see this panel).
 const DEMO = [
-  ['professor@isigk.tn', 'professor'],
+  ['supervisor@isigk.tn', 'supervisor'],
   ['leader@isigk.tn', 'leader'],
   ['coleader@isigk.tn', 'coleader'],
   ['hr@isigk.tn', 'manager'],
@@ -23,6 +26,10 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [demo, setDemo] = useState(false);
+
+  // demo panel only when the server actually seeded demo accounts
+  useEffect(() => { api('/health').then((h) => setDemo(!!h.demo)).catch(() => setDemo(false)); }, []);
 
   // wait for the auth check, then send signed-in users to the dashboard
   if (loading) {
@@ -49,7 +56,7 @@ export default function Login() {
         <div className="login-brand">
           <div className="mark"><Bot size={20} /></div>
           <div>
-            <h1>ISIGK Robotics Club</h1>
+            <h1>Robotics Club Platform</h1>
             <p>Management platform</p>
           </div>
         </div>
@@ -80,25 +87,33 @@ export default function Login() {
         <Link to="/signup" className="login-cta">
           <UserPlus size={17} />
           <span>
-            <strong>Sign up</strong>
-            <span className="sub">Create the club's Professor account</span>
+            <strong>Create a club</strong>
+            <span className="sub">Start your own club — you become its Supervisor</span>
           </span>
           <ChevronRight size={15} style={{ marginLeft: 'auto' }} />
         </Link>
 
-        <div className="demo-title">Demo accounts — password: password123</div>
-        <div className="demo-grid">
-          {DEMO.map(([mail, role]) => (
-            <button
-              key={mail}
-              type="button"
-              className="demo-item"
-              onClick={() => { setEmail(mail); setPassword('password123'); setError(''); }}
-            >
-              <span className="demo-dot" style={{ background: ROLE_COLORS[role] }} />
-              {ROLE_LABELS[role]}{role === 'manager' ? ` · ${mail.split('@')[0]}` : ''}
-            </button>
-          ))}
+        {demo && (
+          <>
+            <div className="demo-title">Demo accounts — password: password123</div>
+            <div className="demo-grid">
+              {DEMO.map(([mail, role]) => (
+                <button
+                  key={mail}
+                  type="button"
+                  className="demo-item"
+                  onClick={() => { setEmail(mail); setPassword('password123'); setError(''); }}
+                >
+                  <span className="demo-dot" style={{ background: ROLE_COLORS[role] }} />
+                  {ROLE_LABELS[role]}{role === 'manager' ? ` · ${mail.split('@')[0]}` : ''}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        <div className="text-dim text-xs" style={{ textAlign: 'center', marginTop: 14 }}>
+          By signing in you agree to the <Link to="/terms">Terms &amp; Privacy</Link>.
         </div>
       </div>
     </div>

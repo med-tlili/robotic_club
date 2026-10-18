@@ -266,9 +266,11 @@ function AlertsPanel({ manage }) {
 }
 
 /* ============================================================
-   Media tools — private albums + upload + share to public feed
+   Photo albums — EVERY department has its own. The department's
+   manager (or a club leader) creates albums, uploads pictures,
+   shares them to the public feed and deletes them.
    ============================================================ */
-export function MediaTools({ dept }) {
+export function AlbumTools({ dept }) {
   const { user } = useAuth();
   const manage = canManage(user, dept.id);
   const [albums, setAlbums] = useState(null);
@@ -278,22 +280,31 @@ export function MediaTools({ dept }) {
   const [error, setError] = useState('');
   const [uploadFor, setUploadFor] = useState(null);
 
-  const load = () => api('/media/albums').then(setAlbums).catch((e) => { setError(e.message); setAlbums([]); });
-  useEffect(() => { load(); }, []);
+  const load = () => api(`/media/albums?department_id=${dept.id}`)
+    .then(setAlbums).catch((e) => { setError(e.message); setAlbums([]); });
+  useEffect(() => { load(); }, [dept.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // refresh the workspace list AND the public gallery above the feed
+  const reload = () => { load(); window.dispatchEvent(new Event('isigk:albums')); };
 
   const submit = async (e) => {
     e.preventDefault(); setError('');
     try {
-      await api('/media/albums', { method: 'POST', body: { title, description: desc } });
-      setTitle(''); setDesc(''); setComposing(false); load();
+      await api('/media/albums', { method: 'POST', body: { department_id: dept.id, title, description: desc } });
+      setTitle(''); setDesc(''); setComposing(false); reload();
     } catch (err) { setError(err.message); }
+  };
+
+  const removeAlbum = (a) => {
+    if (!window.confirm(`Delete the album “${a.title}” and all its pictures?`)) return;
+    api(`/media/albums/${a.id}`, { method: 'DELETE' }).then(reload).catch((e) => alert(e.message));
   };
 
   if (error && albums === null) return <div className="banner error">{error}</div>;
   if (albums === null) return <Skeleton h={160} />;
 
   return (
-    <ToolBlock label="Media albums" sub={`${albums.length} ${albums.length === 1 ? 'album' : 'albums'} · private to the team`}
+    <ToolBlock label="Photo albums" sub={`${albums.length} ${albums.length === 1 ? 'album' : 'albums'} · managed by the ${dept.name} manager & leaders`}
       action={manage && !composing ? <button className="btn sm" onClick={() => setComposing(true)}><Plus size={13} /> New album</button> : null}>
       {composing && (
         <form className="task-form" onSubmit={submit}>
@@ -309,7 +320,9 @@ export function MediaTools({ dept }) {
         </form>
       )}
       {albums.length === 0 ? (
-        <p className="text-dim text-sm" style={{ margin: 0 }}>No albums yet. Albums are private to the Media team — share pictures to the public feed when ready.</p>
+        <p className="text-dim text-sm" style={{ margin: 0 }}>
+          No albums yet. {manage ? 'Create one and upload pictures — share them to the public feed when ready.' : `The ${dept.name} manager publishes albums here.`}
+        </p>
       ) : (
         <div className="stack" style={{ gap: 14 }}>
           {albums.map((a) => (
@@ -319,13 +332,20 @@ export function MediaTools({ dept }) {
                   <div className="name">{a.title}</div>
                   {a.description && <div className="text-sm text-dim">{a.description}</div>}
                 </div>
-                {manage && (
-                  <button className="btn secondary sm" onClick={() => setUploadFor(uploadFor === a.id ? null : a.id)}>
-                    <Upload size={13} /> Add picture
-                  </button>
-                )}
+                <div className="row" style={{ gap: 6 }}>
+                  {manage && (
+                    <button className="btn secondary sm" onClick={() => setUploadFor(uploadFor === a.id ? null : a.id)}>
+                      <Upload size={13} /> Add picture
+                    </button>
+                  )}
+                  {manage && (
+                    <button className="icon-btn" title="Delete album" aria-label="Delete album" onClick={() => removeAlbum(a)}>
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
               </div>
-              {uploadFor === a.id && <AlbumUpload albumId={a.id} onDone={() => { setUploadFor(null); load(); }} />}
+              {uploadFor === a.id && <AlbumUpload albumId={a.id} onDone={() => { setUploadFor(null); reload(); }} />}
               {a.media.length === 0 ? (
                 <div className="text-faint text-xs" style={{ marginTop: 8 }}>No pictures yet.</div>
               ) : (
@@ -339,13 +359,13 @@ export function MediaTools({ dept }) {
                           <span className="badge success"><Share2 size={11} /> Shared</span>
                         ) : manage ? (
                           <button className="btn secondary sm" title="Share to the public department feed"
-                            onClick={() => api(`/media/media/${m.id}/share`, { method: 'POST', body: {} }).then(load).catch((e) => alert(e.message))}>
+                            onClick={() => api(`/media/media/${m.id}/share`, { method: 'POST', body: {} }).then(reload).catch((e) => alert(e.message))}>
                             <Share2 size={12} /> Share
                           </button>
                         ) : null}
                         {manage && (
                           <button className="icon-btn" title="Delete" aria-label="Delete picture"
-                            onClick={() => { if (window.confirm('Delete this picture?')) { api(`/media/media/${m.id}`, { method: 'DELETE' }).then(load); } }}>
+                            onClick={() => { if (window.confirm('Delete this picture?')) { api(`/media/media/${m.id}`, { method: 'DELETE' }).then(reload); } }}>
                             <Trash2 size={13} />
                           </button>
                         )}

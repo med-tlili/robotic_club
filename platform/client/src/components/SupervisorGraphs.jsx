@@ -5,10 +5,10 @@ import { Panel, Skeleton } from './ui';
 import { BarChart, HBarList, Donut } from './Charts';
 
 /* ============================================================
-   Professor dashboard graphs — real club data from /reports/charts
-   Only rendered for the Professor (see Dashboard.jsx).
+   Supervisor dashboard graphs — real club data from /reports/charts
+   Only rendered for the Supervisor (see Dashboard.jsx).
    ============================================================ */
-export default function ProfessorGraphs() {
+export default function SupervisorGraphs() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const now = new Date();
@@ -30,7 +30,7 @@ export default function ProfessorGraphs() {
       <div className="page-head" style={{ marginTop: 4 }}>
         <div>
           <h2 style={{ fontSize: 18 }}>Club activity at a glance</h2>
-          <div className="sub">Visual trends for the supervising Professor</div>
+          <div className="sub">Visual trends for the supervising Supervisor</div>
         </div>
         <div className="head-meta">
           <div className="field" style={{ marginBottom: 0 }}>

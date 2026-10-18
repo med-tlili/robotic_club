@@ -9,7 +9,7 @@
 //    it private. Never run production on the default dev secret.
 //
 //  First run on a new host: the site starts EMPTY (5 departments
-//  only). Open /signup → create the Professor account → Members
+//  only). Open /signup → create the Supervisor account → Members
 //  page → create the Leader → the Leader creates everyone else.
 // ============================================================
 const fs = require('fs');

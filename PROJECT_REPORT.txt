@@ -1,0 +1,906 @@
+================================================================================
+                ISIGK ROBOTICS CLUB — PLATFORM
+                     PROJECT REPORT
+================================================================================
+Project folder : C:\Users\USER\Desktop\club_robotic
+Repository     : https://github.com/med-tlili/robotic_club.git
+Report date    : 2026-10-18
+Source of truth: README.md (living spec)  ·  LaTeX report: rapport/ (frozen)
+
+--------------------------------------------------------------------------------
+TABLE OF CONTENTS
+--------------------------------------------------------------------------------
+  1. Global idea (vision, problem, solution, scope)
+  2. Roles, departments & features
+  3. Technology stack
+  4. System architecture
+  5. Network architecture (3 deployment modes)
+  6. Folder & file tree
+  7. Database schema
+  8. HTTP API overview
+  9. Security model
+ 10. Deployment, backups & cron
+ 11. Project status & roadmap
+
+================================================================================
+1. GLOBAL IDEA
+================================================================================
+
+1.1 VISION
+---------
+One single web platform where the whole robotics club — from the Supervisor down
+to simple Guests — manages its departments, communicates and organizes events.
+
+  Supervisor -> Leader -> Co-Leader -> Managers -> Members -> Guests
+
+It replaces the current reality of scattered WhatsApp groups, Excel files and
+loose folders.
+
+1.2 PAIN POINTS ADDRESSED
+-------------------------
+  * Scattered communication (WhatsApp noise, no structure)
+  * No central member registry
+  * Manual, chaotic event organisation
+  * Untracked materials and equipment
+  * Invisible finances (sponsorships, budget, expenses)
+  * No possibility of remote collaboration
+
+1.3 SOLUTION (MVP)
+------------------
+  * Authentication + 6 roles with strict, server-side permissions
+  * 4 active departments (HR, Events, Media, Finance) + Materials "Coming soon"
+  * Every department has a PUBLIC HOME PAGE (announcements, votes, comments,
+    sponsor offers, clips, albums) and a PRIVATE SPACE (chat + tasks)
+  * Chat: global / managers / department / 1-to-1 private, with file & image
+    attachments, live via Socket.io
+  * Votes (Yes/No, 1 per user, changeable, transparent) + comments
+  * Members directory (hidden from guests) -> click a member = open private chat
+  * Albums browsable by all members, managed by the Media department
+  * HR: manual attendance, meeting conclusions, rule-break alerts
+  * Events: itinerary/journey + decoration planning
+  * Global calendar (Leader writes, everyone reads) + goals per department
+  * Supervisor dashboard with real aggregated graphs
+  * Supervisor reports: monthly / full year / per department (PDF, pdfkit)
+  * In-app notifications
+  * Off-site backups: local + monthly Google Drive snapshots, Storage page
+    with quota alerts
+
+1.4 TRUST CHAIN (multi-club, no free role escalation)
+-----------------------------------------------------
+  * One install hosts MANY clubs; every row of club data is scoped by club_id.
+  * First page = Sign in / Create a club. POST /api/auth/create-club (public
+    /signup) creates a club + its five departments and makes the founder its
+    FIRST SUPERVISOR. It grants no power over any other club. (Replaces the
+    earlier one-time /signup bootstrap; see the changelog below.)
+  * Inside a club, accounts are made on the chain:
+      - Supervisor -> "Create account" (Members page): role Leader, or
+        another Supervisor (a club may have several)
+      - Leader / Co-Leader -> create every other account
+      (Co-Leader, Manager, Member, Guest)
+  * Manager / Member / Guest -> 403, no self-registration endpoint exists
+  * Self-service profile: every signed-in user edits their OWN name/bio and
+    password (PATCH /api/users/me, POST /api/users/me/password). Role and
+    department are NEVER self-editable.
+
+================================================================================
+2. ROLES, DEPARTMENTS & FEATURES
+================================================================================
+
+2.1 ROLES
+---------
+  Role          Powers
+  ------------  ----------------------------------------------------------
+  Supervisor     Sees everything (graphs, goals, all tasks, all chats).
+                READ-ONLY on management (no posts/comments/member edits/
+                tasks/calendar/department tools) — with TWO writes: creating
+                Leader accounts AND adding further Supervisors. Chats like a
+                member. CAN vote. Downloads reports (monthly / yearly / dept).
+  Leader        Full control: departments, chats, assigns goals, owns the
+                global calendar, promotes/removes users, creates accounts.
+  Co-Leader     Same powers as Leader, including creating accounts.
+  Manager       Own department (HR / Events / Media / Finance): public home
+                content, private space, tasks, department chat.
+  Member        Belongs to 1 department: tasks, chats, votes, directory.
+  Guest         Public home pages ONLY: no directory, no votes, no chats.
+
+  "Bosses" = Supervisor + Leader + Co-Leader -> access everything.
+
+2.2 DEPARTMENTS
+---------------
+  HR       Public: announcements | Private: meeting conclusions, manual
+           attendance, rule-break alerts, tasks
+  Events   Public: announcements | Private: itinerary, decoration planning,
+           tasks
+  Media    Public: clips with 👍/👎 vote + comments + album cards | Private:
+           album/photo management, tasks
+  Finance  Public: sponsor offers (money OR goods) with vote + comments |
+           Private: sponsor pipeline, budget/expenses, tasks
+  Materials  ⏳ Coming soon (deferred to PROD)
+
+2.3 CHAT ROOMS
+--------------
+  💬 Global      : everyone including the Supervisor
+  👔 Managers    : 4 managers + leader + co-leader + supervisor
+  🏢 Department  : department members + leaders + supervisor
+  🔒 Private 1↔1 : opened by clicking a member of the directory
+  Bosses see all rooms. Attachments are private + HMAC-signed URLs.
+
+================================================================================
+3. TECHNOLOGY STACK
+================================================================================
+
+  Layer            Choice
+  ---------------  ---------------------------------------------------------
+  Frontend         React 19 + Vite 8, react-router-dom 7, lucide-react icons
+                   socket.io-client
+                   Light "engineering brand" theme — CSS tokens in index.css
+                   (Ink Navy #172B4D, Cobalt #2457C5, Circuit Teal #168C88,
+                   Amber #E7A23B, Cool Gray #D8E0EA, Mist White #F7F9FC)
+  Backend          Node.js + Express 5 (CommonJS)
+  Database         SQLite through @libsql/client — ONE code base runs on
+                   file:club.db (dev / self-host) or Turso online
+                   (TURSO_URL + TURSO_AUTH_TOKEN). better-sqlite3 kept only
+                   as a devDependency for local regression scripts.
+                   Whole server is async (Promise facade in db.js + `ready` gate)
+  Real-time        Socket.io 4 — in-memory adapter locally,
+                   @socket.io/redis-adapter + ioredis (Upstash) on Vercel
+  Auth             JWT (jsonwebtoken) + bcryptjs, guard in middleware/auth.js
+  Uploads          multer with a custom engine -> local uploads/public +
+                   uploads/private, OR Vercel Blob when
+                   BLOB_READ_WRITE_TOKEN is set (same random names, same
+                   signed-URL API)
+                   sharp -> 800px WebP thumbnails (EXIF-rotated)
+                   Client re-encodes images > 3.5 MB (max 2048 px WebP)
+  File security    uploads/public  = feed images (guest-viewable)
+                   uploads/private = album photos + chat attachments,
+                   served only through 24h HMAC-signed URLs (?e=<unix>&s=<sig>,
+                   JWT secret, timingSafeEqual), proxied so the store URL
+                   never reaches the browser
+  Reports / PDF    pdfkit (monthly / full-year / department reports)
+  Backups          npm run backup -> platform/backups/<timestamp>/
+                   Google Drive monthly snapshots:
+                     - local/self-host : rclone -> gdrive:ISIGK-Club-Backups/YYYY-MM
+                     - Vercel          : pure-Node Drive REST client
+                       (driveClient.js, service account ISIGK_DRIVE_SA_JSON
+                       or OAuth refresh token via drive-auth.js)
+                   Storage page /storage with quota alerts (amber >= 80 %,
+                   red >= 95 %)
+  Video meeting    Jitsi embedded iframe (test)
+  Lint             oxlint
+  Report toolchain MiKTeX (rapport/ LaTeX -> 29-page PDF)
+  Hosting          Vercel (serverless Express + static client + cron)
+                   or self-host (`npm start`, serves UI + API on one port)
+                   or LAN (`START-SERVER.bat`, port 4000 over WiFi)
+  CI / registry    GitHub — https://github.com/med-tlili/robotic_club
+                   (68 files: platform/ server+client incl. client/dist,
+                   rapport/, root README)
+                   NEVER committed: club.db*, uploads/, backups/,
+                   node_modules/, .jwt-secret
+
+  SERVER package.json dependencies:
+    @libsql/client, @socket.io/redis-adapter, @vercel/blob, bcryptjs, cors,
+    express 5, ioredis, jsonwebtoken, multer, pdfkit, sharp, socket.io
+    devDependency: better-sqlite3
+
+  CLIENT package.json dependencies:
+    react 19, react-dom 19, react-router-dom 7, socket.io-client, lucide-react
+    devDependencies: vite 8, @vitejs/plugin-react, oxlint, @types/react
+
+  SERVER npm scripts:
+    start        -> node start-prod.js   (production: no demo data, JWT secret
+                                          generated once into .jwt-secret)
+    start:demo   -> node index.js        (demo seed, 9 accounts password123)
+    backup       -> node backup.js
+    sync-drive   -> node sync-drive.js   (monthly scheduler CLI entry)
+
+  CLIENT npm scripts:
+    dev, build, lint, preview
+
+================================================================================
+4. SYSTEM ARCHITECTURE
+================================================================================
+
+4.1 OVERVIEW (3-tier, single-origin)
+---------------------------------------------------------------------------
+  +---------------------------        +-------------------------------+
+  |  BROWSER (React SPA)            |  Socket.io client              |
+  |  pages/ + components/           |  src/socket.js (JWT in auth)   |
+  +-------------+--------------------+---------------+----------------+
+                |  HTTPS/HTTP  fetch /api/* (JWT Bearer)   |  WS / polling
+                v                                         v
+  +--------------------------------------------------------------------+
+  |  EXPRESS SERVER (platform/server/index.js)                         |
+  |  ----------------------------------------------------------------  |
+  |  middleware/auth.js     JWT verify + role guard                    |
+  |  routes/*               16 route families mounted under /api       |
+  |  deptPerms.js           central department permission helpers      |
+  |  notify.js              in-app notification writer                 |
+  |  storage.js             multer engine + public/private + signed URL|
+  |  db.js                  libsql facade (async) + schema + seed      |
+  |  driveClient.js         Google Drive REST (Vercel)                 |
+  |  driveBackup.js         monthly snapshot builder                   |
+  |  socket.io              chat:message / chat:activity / notifications
+  +-----------+----------------------------+---------------------------+
+              |                            |
+   +----------v-----------+    +-----------v--------------------------+
+   | STORAGE (pick one)   |    | DATABASE (pick one)                  |
+   | local uploads/       |    | SQLite file: club.db   (dev/self-host)|
+   |  public/  private/   |    | Turso (libsql over HTTP) (Vercel)     |
+   |  - or -              |    +--------------------------------------+
+   | Vercel Blob          |
+   +----------------------+
+
+4.2 BACKEND STRUCTURE (platform/server)
+---------------------------------------------------------------------------
+  index.js            Express app + Socket.io server + route mounting.
+                       Exports `readyApp` synchronously for Vercel; locally
+                       it calls server.listen(PORT) only after schema+seed
+                       are ready (gated by db `ready` promise).
+  start-prod.js        Production entry (npm start): ISIGK_DEMO_ACCOUNTS=0,
+                       persistent JWT_SECRET written to .jwt-secret.
+  db.js                CREATE TABLE (23 tables), non-destructive migrations,
+                       demo seed, backup() = VACUUM INTO,
+                       exportSnapshot() = JSON dump of every table.
+  middleware/auth.js   Verifies Bearer JWT -> req.user; role helpers.
+  deptPerms.js         canReadDept / canManageDept style helpers.
+  notify.js            Insert notifications + socket emit.
+  storage.js           Custom multer disk/Blob engine, random filenames
+                       (timestamp-hex8.ext), sharp thumbnails, HMAC signed
+                       URLs, legacy upload migration (migrateLegacyUploads).
+  backup.js            npm run backup -> SQLite online backup + uploads copy.
+  driveBackup.js       Stages club.db (or exportSnapshot) + uploads, pushes
+                       to <remote>/YYYY-MM, bookkeeping tables
+                       drive_backups + settings.
+  driveClient.js       Pure-Node Google Drive REST (service account or
+                       refresh token) — used where rclone cannot run.
+  drive-auth.js        One-time OAuth flow -> prints refresh token.
+  sync-drive.js        CLI for the Windows scheduled task.
+  routes/              16 files (see section 8).
+
+4.3 FRONTEND STRUCTURE (platform/client)
+---------------------------------------------------------------------------
+  index.html           Vite entry
+  vite.config.js       React plugin + /api & /socket.io proxy to :4000 in dev
+  src/main.jsx         ReactDOM root
+  src/App.jsx          BrowserRouter, all routes, grouped sidebar Layout,
+                       route guards (RequireMember, RequireSupervisor,
+                       RequireStorage)
+  src/auth.jsx         Auth context: token storage, signIn(), currentUser
+  src/api.js           fetch helper (BASE + JWT Bearer header)
+  src/socket.js        one shared Socket.io connection (auth: {token},
+                       transports websocket + polling, reconnect-safe)
+  src/roles.js         role/dept labels, colours, icons
+  src/compress.js      client-side image re-encode (>3.5 MB -> WebP 2048px)
+  src/index.css        design tokens + full light theme
+  src/components/      ui.jsx (Avatar, RolePill, Panel, EmptyState…)
+                       PostFeed.jsx, DeptTools.jsx (38 KB, all dept tools),
+                       AlbumsGallery.jsx, Charts.jsx, SupervisorGraphs.jsx,
+                       TasksPanel.jsx, NotificationsBell.jsx
+  src/pages/           Login, Signup, Terms, Profile, Dashboard, Members,
+                       DepartmentHome, Chat, Meetings, MeetingRoom, Calendar, Settings, Reports, Storage
+
+  ROUTES
+    /login                     public
+    /signup                    public -> create your own club (you become its Supervisor)
+    /terms                     public -> Terms / privacy / acceptable use
+    /                          Home feed — every department's posts (Layout)
+    /dashboard                  role dashboard (Layout)
+    /profile                   own name/bio/password (any signed-in user)
+    /settings                  appearance (light/dark) + reduce motion + policies
+    /calendar                  global calendar
+    /members                   directory + account creation (RequireMember)
+    /departments/:slug         department public home + private space
+    /chat                      chat list (RequireMember)
+    /chat/:userId              private thread (RequireMember)
+    /reports                   supervisor reports (RequireSupervisor)
+    /storage                   backups & quota (RequireStorage)
+    *                          -> redirect to /
+
+================================================================================
+5. NETWORK ARCHITECTURE
+================================================================================
+
+The project has ONE code base and THREE possible deployment modes. All three
+expose the same URL space: /api/*, /socket.io/*, /uploads/*, everything else
+= SPA.
+
+---------------------------------------------------------------------------
+MODE A — VERCEL (recommended, online, current target)
+---------------------------------------------------------------------------
+
+   Members (anywhere, any network, phone or PC)
+        |  HTTPS
+        v
+   +--------------------------------------------------+
+   |  VERCEL EDGE / ROUTER   (vercel.json: builds +   |
+   |  routes, legacy model; installCommand installs   |
+   |  platform/server + platform/client deps)         |
+   |   /socket.io/*  -> platform/server/index.js      |
+   |   /api/*        -> platform/server/index.js      |
+   |   /uploads/*    -> platform/server/index.js      |
+   |   /assets/*     -> platform/client/assets/$1     |
+   |   /favicon.ico  -> platform/client/favicon.ico   |
+   |   /favicon.svg  -> platform/client/favicon.svg   |
+   |   /icons.svg    -> platform/client/icons.svg     |
+   |   /*            -> platform/client/index.html    |  (SPA fallback)
+   +--------------------------------------------------+
+        |                          |
+        | serverless function      | static files
+        v                          v
+   +---------------------+   +------------------------+
+   | Express 5 + Socket  |   | React build (client/   |
+   | @vercel/node        |   | dist) served from      |
+   | (maxDuration via    |   | /platform/client/      |
+   |  dashboard if slow) |   +------------------------+
+   +--+-------+-------+--+
+      |       |       |
+      |       |       +--> Vercel Blob  (BLOB_READ_WRITE_TOKEN)  uploads
+      |       +----------> Upstash Redis (REDIS_URL)  Socket.io
+      |                                              pub/sub adapter ->
+      |                                              live chat across
+      |                                              function instances
+      +------------------> Turso (TURSO_URL + TURSO_AUTH_TOKEN)
+                                              hosted SQLite (libsql HTTP)
+
+   +------------------ cron ------------------------------+
+   |  GET /api/storage/cron-sync                          |
+   |  schedule "0 3 * * *" (daily on Hobby plan)          |
+   |  guarded by CRON_SECRET, skips every day except      |
+   |  "this month is not backed up yet" -> once a month   |
+   +----------------------|-------------------------------+
+                          v
+                Google Drive  ISIGK-Club-Backups/YYYY-MM
+                (driveClient.js — service account or OAuth refresh token)
+
+   Characteristics
+     - Single Vercel project = API function + static client (one origin,
+       no CORS/cookie issues)
+     - Hobby plan limits accepted: WebSocket capped at 300 s (engine.io
+       auto-reconnects, every handler is reconnect-safe), request body
+       ~4.5 MB (client re-encodes large images), daily crons only
+     - Traffic encrypted end-to-end by Vercel HTTPS
+     - Env vars: JWT_SECRET (REQUIRED), ISIGK_DEMO_ACCOUNTS=0, CRON_SECRET,
+       TURSO_URL/TURSO_AUTH_TOKEN, BLOB_READ_WRITE_TOKEN, REDIS_URL,
+       CORS_ORIGIN (optional), ISIGK_DRIVE_* credentials
+
+---------------------------------------------------------------------------
+MODE B — SELF-HOST (own machine or school server, public or LAN)
+---------------------------------------------------------------------------
+
+   git clone https://github.com/med-tlili/robotic_club.git
+   cd robotic_club/platform/server && npm install && npm start
+
+   Client (built, committed in client/dist) and API served by the SAME
+   Express process on ONE port (PORT, default 4000):
+
+        browser  --HTTP:4000-->  Express
+                                   |-- static  platform/client/dist
+                                   |-- /api/*  routes
+                                   |-- /uploads (local disk, signed URLs)
+                                   |-- /socket.io (in-memory adapter)
+                                   +-- club.db on local disk
+
+   Backups: local `npm run backup` + rclone -> gdrive:ISIGK-Club-Backups
+   (rclone configured once with a browser consent).
+
+---------------------------------------------------------------------------
+MODE C — "YOUR PC IS THE SERVER" (LAN / WiFi, START-SERVER.bat)
+---------------------------------------------------------------------------
+
+   [Supervisor's laptop]                         [Members on the same WiFi]
+   +---------------------------------+          +-------------------------+
+   | START-SERVER.bat                |          | PC / phone browser      |
+   |  -> cd platform\server          |          |                         |
+   |  -> npm install (first run)     |  WiFi    | opens http://192.168.x.x|
+   |  -> npm start (start-prod.js)   | <------> | :4000                   |
+   |                                 |  router  +-------------------------+
+   | Node.js listens on 0.0.0.0:4000|
+   | Windows Firewall: inbound TCP   |
+   |  4000 ALLOW ("ISIGK Club -      |
+   |  port 4000", profile Any)       |
+   +---------------------------------+
+
+   Setup (once, as Administrator):
+     New-NetFirewallRule -DisplayName "ISIGK Club - port 4000" `
+       -Direction Inbound -Protocol TCP -LocalPort 4000 `
+       -Action Allow -Profile Any
+
+   Startup banner prints every LAN address: "📡 Club members open: http://…:4000"
+   (verified: http://192.168.1.11:4000 -> HTTP 200 on the Wi-Fi adapter;
+    192.168.56.1 in the log is the VirtualBox adapter — members use 192.168.1.x)
+
+   Rules / limits of this mode
+     - The laptop must stay ON with the server window open
+     - The router's DHCP address can change -> RESERVE the address in the
+       router's DHCP settings so the club link never breaks
+     - Same-network only; members on mobile data / other WiFi cannot reach it
+       -> optional tunnels offered but not built:
+          · Tailscale : free fixed private address per member
+          · Cloudflare Tunnel : public link
+
+---------------------------------------------------------------------------
+COMPARISON
+---------------------------------------------------------------------------
+   Mode       Reach              Availability        Cost      Live chat
+   ---------  -----------------  ------------------  --------  -------------
+   A Vercel   Internet, anyone   Always on (PaaS)    Hobby $$$  Redis adapter
+   B Self-    LAN or Internet    Machine must run    Free      in-memory
+      host    (if port-forward)  + power
+   C LAN PC   Same WiFi only     Laptop on + bat     Free      in-memory
+
+---------------------------------------------------------------------------
+DATA FLOWS
+---------------------------------------------------------------------------
+   Authentication : POST /api/auth/login -> JWT (Bearer) -> stored client-side
+                    -> sent on every fetch + as Socket.io `auth.token`
+   REST calls     : /api/** (JSON) — one JSON error handler, API failures
+                    never return HTML
+   Real-time      : Socket.io rooms
+                      room:<key>       department / global / managers rooms
+                      user:<uid>       per-user activity
+                      dm:<a>-<b>       private thread
+                    events: chat:message, chat:activity, notification pushes
+   Uploads        : client re-encode (>3.5 MB) -> POST multipart -> multer
+                    engine -> random name -> sharp thumb ->
+                    public: redirect to store / private: proxy after
+                    HMAC signature check (?e=<unix>&s=<sig>)
+   Backups        : club.db (VACUUM INTO or JSON export) + uploads/ tree ->
+                    rclone (local) or Drive REST (Vercel) -> YYYY-MM folder,
+                    bookkeeping in drive_backups + settings kv
+
+================================================================================
+6. FOLDER & FILE TREE
+================================================================================
+
+  Legend:  D = directory   F = file (size)
+          node_modules/, .git/, client/dist/ and bulk media are summarised.
+
+club_robotic/
+|
++-- README.md .......................... 66.8 KB  LIVING SPEC (single source
+|                                          of truth: idea, roles, features,
+|                                          tech, run guide, decisions log)
++-- README.txt .......................... 1.2 KB  quick readme
++-- PROJECT_REPORT.txt ......................... THIS FILE
++-- vercel.json .......................... 0.8 KB  Vercel build/routes/cron
++-- START-SERVER.bat ..................... 0.6 KB  LAN launcher (Mode C)
++-- .gitignore / .vercelignore
+|
++-- platform/ ................................. THE WEB APPLICATION
+|   |
+|   +-- server/ .............................. BACKEND (port 4000)
+|   |   +-- index.js ................ 7.5 KB  Express + Socket.io entry,
+|   |   |                                       route mounting, exports readyApp
+|   |   +-- start-prod.js ........... 1.5 KB  npm start (production seed)
+|   |   +-- db.js .................. 23.8 KB  schema (23 tables), migrations,
+|   |   |                                       seed, backup(), exportSnapshot()
+|   |   +-- middleware/
+|   |   |   +-- auth.js ............. 1.6 KB  JWT verify + role guard
+|   |   +-- deptPerms.js ............ 1.0 KB  department permission helpers
+|   |   +-- notify.js ............... 1.3 KB  in-app notifications
+|   |   +-- storage.js ............. 11.5 KB  multer engine, public/private
+|   |   |                                       trees, sharp thumbs, signed URLs
+|   |   +-- backup.js ............... 1.5 KB  npm run backup
+|   |   +-- sync-drive.js ........... 1.0 KB  monthly scheduler CLI
+|   |   +-- driveBackup.js ......... 11.8 KB  Drive snapshot builder
+|   |   +-- driveClient.js .......... 7.7 KB  pure-Node Drive REST (Vercel)
+|   |   +-- drive-auth.js ........... 3.3 KB  one-time OAuth refresh token
+|   |   +-- routes/ ......................... 16 route families
+|   |   |   +-- auth.js ............ 4.3 KB  login, create-club, me
+|   |   |   +-- users.js ............ 7.3 KB  directory, create accounts (chain)
+|   |   |   +-- departments.js ...... 2.1 KB  public/private department data
+|   |   |   +-- goals.js ............ 1.4 KB  Leader-assigned goals
+|   |   |   +-- posts.js ............ 7.6 KB  announcements, votes, comments
+|   |   |   +-- events.js ........... 3.1 KB  calendar events
+|   |   |   +-- applications.js ..... 5.8 KB  club applications
+|   |   |   +-- tasks.js ............ 8.2 KB  per-department tasks
+|   |   |   +-- notifications.js .... 1.5 KB  list / read
+|   |   |   +-- chat.js ............ 12.8 KB  4 room kinds + attachments
+|   |   |   +-- reports.js ..........10.4 KB  PDF reports (pdfkit)
+|   |   |   +-- media.js ............ 6.6 KB  albums, upload, share to feed
+|   |   |   +-- hr.js ............... 6.0 KB  attendance, conclusions, alerts
+|   |   |   +-- plans.js ............ 4.1 KB  itinerary + decoration
+|   |   |   +-- finance.js .......... 5.2 KB  sponsors (money/goods), budget
+|   |   |   +-- storage.js .......... 2.9 KB  Drive sync, quota, cron-sync
+|   |   +-- package.json / package-lock.json
+|   |   +-- club.db (+ -shm/-wal) ........... DATABASE (git-ignored)
+|   |   +-- club-demo-backup.db ............ archived demo DB
+|   |   +-- .jwt-secret .................... generated secret (git-ignored)
+|   |   +-- uploads/
+|   |   |   +-- public/ .................... feed images (guest-viewable)
+|   |   |   +-- private/ ................... album photos + chat files,
+|   |   |   |                                 HMAC-signed access, thumbs
+|   |   +-- uploads-demo-backup/ ........... archived demo media
+|   |   +-- node_modules/ .................. (installed deps)
+|   |
+|   +-- client/ ............................. FRONTEND (Vite, port 5173)
+|   |   +-- index.html ................ 0.3 KB
+|   |   +-- vite.config.js ........... 0.2 KB  React plugin + dev proxy
+|   |   +-- package.json / package-lock.json
+|   |   +-- .oxlintrc.json / .gitignore
+|   |   +-- public/
+|   |   |   +-- favicon.svg, icons.svg
+|   |   +-- src/
+|   |   |   +-- main.jsx ............. 0.2 KB  React root
+|   |   |   +-- App.jsx .............. 8.1 KB  routes + grouped sidebar layout
+|   |   |   +-- auth.jsx ............. 1.3 KB  auth context / signIn
+|   |   |   +-- api.js ............... 0.8 KB  fetch helper w/ JWT
+|   |   |   +-- socket.js ............ 0.8 KB  shared Socket.io connection
+|   |   |   +-- roles.js ............. 1.3 KB  role/dept labels, colours, icons
+|   |   |   +-- compress.js .......... 1.6 KB  client-side image re-encode
+|   |   |   +-- index.css ............46.1 KB  design tokens + full theme
+|   |   |   +-- pages/
+|   |   |   |   +-- Login.jsx (3.6)  Signup.jsx (3.4)  Dashboard.jsx (26.3)
+|   |   |   |   +-- Members.jsx (14.9) DepartmentHome.jsx (7.7)
+|   |   |   |   +-- Chat.jsx (14.3)  Calendar.jsx (11.2)
+|   |   |   |   +-- Reports.jsx (7.4) Storage.jsx (9.5)
+|   |   |   +-- components/
+|   |   |   |   +-- ui.jsx (3.3)             Avatar/RolePill/Panel/EmptyState
+|   |   |   |   +-- PostFeed.jsx (13.6)       posts + votes + comments
+|   |   |   |   +-- DeptTools.jsx (38.5)      all department tools
+|   |   |   |   +-- AlbumsGallery.jsx (3.9)   album cards on Media home
+|   |   |   |   +-- TasksPanel.jsx (8.4)
+|   |   |   |   +-- Charts.jsx (4.2) / SupervisorGraphs.jsx (2.7)
+|   |   |   |   +-- NotificationsBell.jsx (4.7)
+|   |   |   +-- assets/ (hero.png, vite.svg)
+|   |   +-- dist/ ........................... built SPA (committed, served
+|   |                                          in self-host mode / Vercel static)
+|   |
+|   +-- backups/
+|       +-- 2026-10-15-22-44-56/
+|           +-- club.db (124 KB)
+|           +-- uploads/public/..., uploads/private/...
+|
++-- rapport/ ................................ LaTeX REPORT (frozen till the end)
+|   +-- rapport_robotic_club.tex ... 36.5 KB
+|   +-- rapport_robotic_club.pdf ...293.9 KB  29 pages
+|   +-- rapport_robotic_club.lot
+|   +-- figures/
+|
++-- robotics_club_video/ ................... PROMOTIONAL VIDEO PIPELINE (Python)
+|   +-- work/
+|   |   +-- film.py (47.4 KB) ....... main MoviePy composition
+|   |   +-- gfx_lib.py, gen_assets.py, audio.py, audio_qc.py
+|   |   +-- build_final.py, sheets_gen.py, inventory.py, grab.py
+|   |   +-- logo_*.py, sprite_probe.py, stub_probe.py, duplicates.json
+|   |   +-- cache/, vidframes/, vidframes/sheets/, pptx_extract/
+|   +-- assets/  (audio/, fonts/Montserrat-*, generated/ A..H, original/)
+|   +-- logs/    (inventory.json, inventory.txt, render1.log)
+|   +-- previews/render_check.mp4
+|
++-- src/ ................................... RAW MEDIA for the video
+|   +-- ~170 files: 1.jpeg … 167.jpeg, 5.mp4 … 141.mp4, WhatsApp images/videos
+|
++-- layers/ ............................... poster layers (background, logo,
+|                                            photo) used by build_layers.py
++-- work/ .................................. scratch workspace
+|
++-- build_layers.py / build_pptx.py ....... poster & PPTX generators
++-- Club_Robotic_Poster_Canva.pptx
++-- montage_club_robotic.mp4 (114 MB) / _v2.mp4 (115 MB) / _v2.mp3
++-- montage_preview.png / montage_preview_v2.png / MONTAGE_README.txt
++-- 1012.mp4 (77 MB) / 1012.mp3
++-- Compte_rendu_Robotics_Club_07-10-2026.pdf  (meeting minutes)
++-- Plan d'action robotique … .png / plan.png / compare.png / preview.png
++-- qr.png / pasted_image_1.png
+
+  (git-ignored: club.db*, uploads/, backups/, node_modules/, .jwt-secret)
+
+================================================================================
+7. DATABASE SCHEMA (23 tables, SQLite / libsql)
+================================================================================
+
+  users               accounts, role, department, password hash
+  departments         the 5 departments (slug, name, public description)
+  posts               announcements on department home pages
+  votes               Yes/No per user per post (changeable, transparent)
+  comments            comments on posts
+  events              calendar events (Leader-owned)
+  goals               goals assigned by the Leader to departments
+  tasks               per-department tasks
+  messages            chat messages + attachment_name (display) + attachment
+  chat_reads          read markers per user per room
+  notifications       in-app notifications
+  albums              Media albums
+  album_media         album photos + thumb_path + shared_post_id (copy-on-share)
+  attendance          manual HR presence/absence
+  meeting_notes       HR meeting conclusions
+  alerts              HR rule-break alerts
+  itineraries         Events journey/itinerary
+  decorations         Events decoration planning
+  sponsors            Finance sponsors: kind (money|goods) + details + value
+  budget_entries      Finance budget / expenses
+  applications        club applications
+  drive_backups       month · path · size bookkeeping
+  settings            kv store (last sync time/status/error, quota overrides)
+
+  Binding quirk handled centrally: NaN/undefined -> NULL (legacy semantics).
+
+================================================================================
+8. HTTP API OVERVIEW
+================================================================================
+
+  Mounted in index.js (all under /api):
+
+    /api/auth          POST login (rate-limited) · POST create-club
+                       (new club + its first Supervisor; rate-limited) ·
+                       GET me
+    /api/users         GET directory (not guest) · POST create account (chain)
+                       PATCH /me + POST /me/password (self-service profile)
+    /api/departments   GET list (your club) · GET :slug (your club; member
+                       list decided server-side by role)
+                       GET :slug/private (dept members + bosses)
+    /api/goals         GET · POST (Leader/Co-Leader)
+    /api/posts         GET ?department_id= (one dept) · GET /feed (the CLUB
+                       home feed: all depts, club-scoped, cursor-paginated)
+                       POST create: type text|image|video|poll (media must
+                       match the type; poll 2-6 options)
+                       + POST /:id/vote (reaction yes|no|maybe, not guest)
+                       + POST /:id/poll-vote (one option per member)
+                       + comments (canWrite: not guest, not supervisor)
+    /api/events        calendar (auth required; every member incl. guests
+                       reads, Leader/Co-Leader writes)
+    /api/applications  club applications
+    /api/tasks         department tasks
+    /api/notifications list / mark read
+    /api/chat          rooms: global · managers · dept:<id> · dm
+                       (canSend == canRead; supervisor can write everywhere;
+                        guests 403 on everything)
+    /api/meetings      live rooms (scope global|department|private).
+                       POST = LEADERSHIP only (supervisor/leader/coleader/
+                       manager). /:id/join = ask (pending until the HOST
+                       accepts via /:id/requests/:userId); /:id/respond =
+                       an INVITED person answers their own invite (a
+                       requester cannot self-accept). /:id/messages = the
+                       meeting chat, accepted participants only. /end closes
+                       posting, keeps the transcript. Club-scoped; a foreign
+                       or invisible meeting answers 404.
+    /api/reports       monthly global / full-year / per-department PDF
+    /api/media         DEPARTMENT photo albums (phase 6). ?department_id=
+                       selects the department (omitted -> Media, legacy).
+                       GET = any member (guests 403); create/upload/delete/
+                       share = that department's manager or a club leader
+                       (canManageDept). Upload -> thumbs, share-to-feed
+                       COPIES the file into that department's feed post.
+                       DELETE /albums/:id unlinks an album's files.
+    /api/hr            attendance, meeting notes, alerts
+    /api/plans         itinerary, decoration
+    /api/finance       sponsors (money needs value, goods needs details),
+                       budget entries
+    /api/storage       Drive sync/re-sync/clear, quota, alerts,
+                       GET /api/storage/cron-sync (guarded by CRON_SECRET)
+
+================================================================================
+9. SECURITY MODEL
+================================================================================
+
+  * Auth           JWT Bearer (jsonwebtoken) + bcryptjs cost 10
+  * Secret         FAIL-CLOSED: env JWT_SECRET -> .jwt-secret file ->
+                   generated once (local dev only). On Vercel/production with
+                   nothing configured it becomes NULL and every auth route
+                   answers 503 — no fallback to a public, forgeable default
+  * Rate limiting  in-memory fixed-window (15 min) on login (10/IP+email,
+                   40/IP) and signup-supervisor (5/IP); reads x-forwarded-for
+                   behind Vercel (best-effort per instance)
+  * Authorisation  enforced SERVER-SIDE on every route (role + department),
+                   mirrored client-side only for UX; role/department are
+                   re-read from the DB on every request (nothing trusted from
+                   the token beyond the user id)
+  * Guests         blocked from directory, albums, chats, votes; but CAN read
+                   the club calendar (a club member like anyone else)
+  * Supervisor      read-only on management; his writes are creating Leader
+                   accounts and adding further Supervisors; CAN chat and vote
+  * Account chain  Manager/Member/Guest cannot be self-registered (403);
+                   no endpoint mints leader/manager from the public side
+  * Profile        self-edit own name/bio/password only; role + department
+                   stay on the Leader-only endpoints (no privilege escalation)
+  * Private files  uploads/private never served statically — 24h HMAC-signed
+                   URLs (?e=<unix>&s=<sig>), timingSafeEqual, proxied so the
+                   storage URL never leaks to the browser
+  * Uploads        multer validates an EXTENSION ALLOWLIST + random on-disk
+                   names; path traversal blocked
+  * Filenames      random on disk (timestamp-hex8.ext); original names kept
+                   in DB for display only
+  * Orphans        deletes unlink files; album delete removes photo + thumb;
+                   share-to-feed copies the file so two owners never share
+                   one physical file
+  * CORS           explicit allowlist (CORS_ORIGIN, comma-separated) +
+                   localhost in dev only — corsCheck uses the (origin,
+                   callback) signature so no blanket "*" is ever emitted
+  * Headers        X-Content-Type-Options nosniff · X-Frame-Options SAMEORIGIN
+                   · Referrer-Policy strict-origin-when-cross-origin
+  * Errors         dedicated JSON error handler (no HTML from the API)
+  * Cron           guarded by CRON_SECRET (404 when unset/mismatched)
+  * Git hygiene    DB, uploads, backups, node_modules, .jwt-secret ignored
+
+================================================================================
+10. DEPLOYMENT, BACKUPS & CRON
+================================================================================
+
+  Deploy on Vercel (~15 min)
+    1. Import github.com/med-tlili/robotic_club (vercel.json knows both halves)
+    2. Marketplace: Turso + Vercel Blob + Upstash Redis
+    3. Env: JWT_SECRET (REQUIRED — auth 503s without it),
+            ISIGK_DEMO_ACCOUNTS=0, CRON_SECRET, optional CORS_ORIGIN,
+            ISIGK_DRIVE_SA_JSON (or CLIENT_ID/CLIENT_SECRET/REFRESH_TOKEN)
+    4. Deploy -> open /signup -> create the club (you become its Supervisor)
+            -> Leader -> the rest. Anyone else can create their own club too.
+
+  Local backup
+    cd platform/server && npm run backup
+    -> platform/backups/<timestamp>/club.db + uploads/
+
+  Drive backup layout
+    ISIGK-Club-Backups/YYYY-MM/   (re-running the month REPLACES it;
+                                    "Clear month" touches only the off-site copy)
+    Cloud DB snapshot goes up as club-export.json instead of club.db
+
+  Quota alerts
+    /storage page: healthy / amber >= 80 % / red >= 95 % — always in words,
+    never colour alone; dashboard banner + notification to leaders on
+    crossings and on failed syncs.
+
+  Restore
+    club-export.json + the uploads tree (manual script documented in the
+    Storage panel and the README).
+
+  Test coverage (2026-10-19): 61/61 across nine isolated suites in
+    platform/server/test/ — auth · signup_chain (fresh DB, 0 demo accounts;
+    create-club + two-club isolation + plural Supervisors) · migration (legacy
+    DB → one club, and the phase-4 posts/votes table rebuild) · calendar
+    (auth + role matrix) ·
+    permissions (role/IDOR matrix) · workflows (post types, Yes/No/Maybe
+    reactions, polls, comments, tasks, profile, home feed) · meetings
+    (creation rules, host-approved joining + self-accept refusal, scope
+    visibility, private invite/accept, invite/leave/end, cross-club
+    isolation) · albums (per-department scoping, manager/leader-only
+    management, upload → share-to-feed, delete, cross-club 404) · security (CORS
+    allowlist, uploads, extension/traversal, cron secret, JSON-not-HTML, no
+    password-hash leaks) — each boots its own temp DB + port (4310-4318).
+    Also: `vite build` clean, oxlint 0 errors.
+    (Superseded 2026-10-17 count: 173/173 across five local regression scripts.)
+
+================================================================================
+11. PROJECT STATUS & ROADMAP
+================================================================================
+
+  Sprint  S0 setup/auth/roles ......... DONE (2026-10-15)
+          S1 posts/votes/comments ..... DONE (2026-10-15)
+          S2 members/calendar/goals ... DONE (2026-10-15)
+          S3 tasks + notifications .... DONE (2026-10-15)
+          S4 chat + attachments + Jitsi  DONE (2026-10-15)
+          S5 finance + reports ........ DONE (2026-10-15)
+          S6 albums + HR + events ..... DONE (2026-10-15)
+          S7 dashboard + deploy ....... DONE (2026-10-15)
+          PROD (see below) ............ TODO
+
+  PROD backlog
+    Materials inventory & loans · video meetings (Jitsi) · email/Telegram
+    alerts · kanban board · member dues · purchase requests · sub-channels ·
+    post-event reports · social planner · FR/EN · notification preferences
+
+  Key decisions (chronological)
+    2026-10-15  Light engineering-brand redesign; supervisor can chat & vote;
+                goods sponsors; album cards for all members; private storage
+                rework (signed URLs, thumbs, real cleanup, backups)
+    2026-10-16  Google Drive monthly backups + Storage page with quota alerts
+    2026-10-17  Account chain: Supervisor creates the Leader, Leader creates
+                everyone else (invite codes added then REMOVED)
+    2026-10-17  Supervisor sign-up made OPEN at any time (user decision)
+                — SUPERSEDED 2026-10-18, reverted to the one-time bootstrap
+    2026-10-17  Production ready: demo cleared, pushed to GitHub, npm start
+                = production entry
+    2026-10-17  LAN mode: START-SERVER.bat, firewall rule, LAN addresses
+    2026-10-17  HOSTING PIVOT: Vercel — async libsql everywhere, Vercel Blob,
+                Redis chat adapter, pure-Node Drive backups, daily cron
+    2026-10-19  PLURAL SUPERVISORS (user: "clubs can have multiple
+                supervisors"): POST /api/users lets a Supervisor create
+                SUPERVISOR accounts as well as the Leader (allowed =
+                ['supervisor','leader']); the old blanket role==='supervisor'
+                rejection is gone, so a Supervisor sending role: supervisor
+                now gets 201. No escalation opens: only a Supervisor may mint
+                one, a Leader/Co-Leader still gets 403 (now the accurate
+                permission 403, not 400 "unknown role"), and PATCH /users/:id/
+                role still refuses supervisor as a target. Client: the
+                Supervisor's create modal offers Leader or Supervisor and the
+                button reads "Create account". signup_chain suite extended
+                (co-supervisor -> 201, same club, login; leader -> 403). 61/61
+                tests, build + lint green. Supervisors still cannot be
+                demoted/removed (protected like Leader/Co-Leader).
+    2026-10-18  SECURITY HARDENING: one-time supervisor bootstrap restored;
+                CORS signature fixed (no more "*"); fail-closed JWT secret;
+                login/signup rate limiting; security headers; upload
+                extension allowlist; calendar requires auth; self-service
+                profile page + endpoints; real 37-test suite replacing the
+                broken one; vercel.json fixed (functions+builds conflict)
+    2026-10-18  SETTINGS + DARK/LIGHT MODE + POLICY & TERMS (phase 7): the UI
+                is token-driven, so dark mode is one :root[data-theme="dark"]
+                block in index.css; new --on-accent / --avatar-ink keep filled
+                controls and role avatars legible, and stray --ink / --cobalt
+                text colours were switched to the themeable --text / --accent.
+                New src/theme.jsx stores system|light|dark in localStorage and
+                applies <html data-theme> before first paint (initTheme in
+                main.jsx); a top-bar Sun/Moon toggle + a /settings page
+                (Appearance, Reduce-motion switch, Account, Policies). /terms is
+                a PUBLIC Terms / acceptable-use / privacy page linked from login
+                and signup. Client-only — no API change, suite stays 61/61.
+                Build + lint green; live preview verified (dark flips the tokens,
+                survives reload, role pills + avatar ink readable, the motion
+                switch and top-bar toggle persist, /terms renders signed out;
+                0 console errors).
+    2026-10-18  DEPARTMENT PHOTO ALBUMS (phase 6): routes/media.js is now
+                department-parameterised (?department_id= / body.department_id;
+                omitted -> Media, legacy). Any member browses a department's
+                albums (guests 403); only that department's manager or a club
+                leader manages them (create/upload/delete/share via
+                canManageDept on the album's own department). New
+                DELETE /albums/:id unlinks an album's files; share-to-feed now
+                posts into the album's department. Client: AlbumsGallery(dept)
+                + renamed AlbumTools render on every department page; an
+                isigk:albums window event keeps the public gallery in sync.
+                New `albums` test suite. 61/61 tests, build + lint green, live
+                preview verified (HR album created + PNG uploaded + gallery
+                live-updated; Media/Finance own galleries; guest sees none).
+    2026-10-18  SECURITY FIX: /api/goals was NOT club-scoped — GET without a
+                department_id returned every club's goals, and GET/POST accepted
+                any department_id. Now gated by deptInClub (foreign department
+                → 404) and the unfiltered list is joined through departments and
+                filtered by club_id. Regression test added (permissions suite).
+    2026-10-18  MEETINGS (phase 5): /meetings live rooms with scope global|
+                department|private. Only leadership may START one; /:id/join is
+                a REQUEST that stays pending until the HOST accepts
+                (/:id/requests/:userId). The participant `origin` (host|
+                invited|requested) stops a requester self-accepting via
+                /:id/respond. Each meeting has its own chat (accepted
+                participants only); /end closes posting but keeps the
+                transcript; a non-participant never sees the chat preview or
+                unread. Socket pushes meet:activity / meet:message. New pages
+                Meetings + MeetingRoom, nav + routes, optional Jitsi video with
+                a deterministic room. New `meetings` test suite. 55/55 tests,
+                build + lint green, live preview verified (host request queue,
+                accept, chat post, member chat, non-participant 403 +
+                self-accept 403; 0 console errors). All new tables, club-scoped,
+                no legacy migration.
+    2026-10-18  POST TYPES + YES/NO/MAYBE REACTIONS (phase 4): posts.type is
+                now the media kind text|image|video|poll; image/video store a
+                file in the public tree, polls store 2-6 options; reactions are
+                yes|no|maybe (changeable, one per member); poll votes are one
+                option per member. posts + votes tables rebuilt once (ids kept),
+                old announcement/clip/offer folded (image -> image else text).
+                Composer picks the type; Poll UI + video element. 48/48 tests
+                (reaction change, poll vote flow, media-must-match-type, legacy
+                CHECK widening), build + lint green, live preview verified
+                (poll counts, reaction toggle, composer publish, video element;
+                0 console errors). Caveat: video capped 50MB (Vercel body limit
+                ~4.5MB — needs direct-to-Blob for large files).
+                Next: meetings, department albums, settings + dark mode + terms.
+    2026-10-18  HOME FEED (phase 3): new landing page "/" = Home (pages/Feed)
+                showing every department's posts in one newest-first timeline;
+                the dashboard moved to /dashboard (nav: Home · Dashboard · My
+                profile). New GET /api/posts/feed (club-scoped, cursor-
+                paginated, guests read, each card links to its department).
+                Composer reused with a department picker. 45/45 tests (feed
+                aggregation, guest read, pagination, per-club isolation), build
+                + lint green, live preview verified (0 console errors).
+                Next: post types image/video/poll/text + Yes/No/Maybe reactions,
+                then meetings, department albums, settings + dark mode + terms.
+    2026-10-18  MULTI-CLUB FOUNDATION: one install hosts many clubs (new
+                clubs table; club_id scopes users/departments/events/messages
+                and the dept-tool tables; departments slug unique per club).
+                New /signup = "create your club" -> POST /auth/create-club
+                (founder becomes its first Supervisor), replacing the one-time
+                supervisor bootstrap. Server-side tenant isolation everywhere;
+                chat socket rooms namespaced per club. Additive id-preserving
+                migration folds legacy data into one default club. Client shows
+                the club name. 43/43 tests (incl. two-club isolation and a
+                legacy-migration suite), build +
+                lint green. Roadmap next: home feed, image/video/poll/text
+                posts with Yes/No/Maybe, meetings, department albums,
+                settings + dark mode + policy/terms.
+    2026-10-18  ROLE RENAME professor -> supervisor (database, API, client,
+                docs); id-preserving users-table migration (old CHECK folded);
+                37/37 tests, build + lint green.
+
+================================================================================
+END OF REPORT
+================================================================================

@@ -1,15 +1,16 @@
 // ============================================================
 //  routes/tasks.js — department tasks (private space)
 //  Rules (README):
-//   - read: department members + Leader/Co-Leader + Professor
+//   - read: department members + Leader/Co-Leader + Supervisor
 //           (Guests: 403 — private space)
 //   - create/edit/delete: the department's manager + Leader/Co-Leader
 //   - status: any member can update the status of THEIR OWN task
-//   - Professor: read-only everywhere
+//   - Supervisor: read-only everywhere
 // ============================================================
 const express = require('express');
 const db = require('../db');
 const { authenticate } = require('../middleware/auth');
+const { deptInClub } = require('../deptPerms');
 const { notify, notifyMany } = require('../notify');
 
 const router = express.Router();
@@ -24,7 +25,7 @@ function canManage(user, deptId) {
 }
 // may this user see this department's tasks?
 function canView(user, deptId) {
-  if (['leader', 'coleader', 'professor'].includes(user.role)) return true;
+  if (['leader', 'coleader', 'supervisor'].includes(user.role)) return true;
   if (user.role === 'guest') return false;
   return user.department_id === deptId;
 }
@@ -42,6 +43,9 @@ function shapeTask(t, user) {
 router.get('/', authenticate, async (req, res) => {
   const deptId = Number(req.query.department_id);
   if (!deptId) return res.status(400).json({ error: 'department_id required' });
+  if (!(await deptInClub(deptId, req.user.club_id))) {
+    return res.status(404).json({ error: 'Department not found' });
+  }
   if (!canView(req.user, deptId)) {
     return res.status(403).json({ error: 'Tasks are private to this department' });
   }
@@ -67,7 +71,7 @@ router.get('/', authenticate, async (req, res) => {
 router.post('/', authenticate, async (req, res) => {
   const { department_id, title, description, assigned_to, due_date } = req.body || {};
   const deptId = Number(department_id);
-  const dept = await db.prepare('SELECT * FROM departments WHERE id = ?').get(deptId);
+  const dept = await db.prepare('SELECT * FROM departments WHERE id = ? AND club_id = ?').get(deptId, req.user.club_id);
   if (!dept) return res.status(400).json({ error: 'Valid department required' });
   if (!canManage(req.user, deptId)) {
     return res.status(403).json({ error: 'Only this department\'s manager or club leaders can create tasks' });
@@ -111,7 +115,7 @@ router.patch('/:id', authenticate, async (req, res) => {
     SELECT t.*, u.full_name AS assigned_to_name FROM tasks t
     LEFT JOIN users u ON u.id = t.assigned_to WHERE t.id = ?
   `).get(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
+  if (!task || !(await deptInClub(task.department_id, req.user.club_id))) return res.status(404).json({ error: 'Task not found' });
   const dept = await db.prepare('SELECT * FROM departments WHERE id = ?').get(task.department_id);
 
   const manager = canManage(req.user, task.department_id);
@@ -191,7 +195,7 @@ router.patch('/:id', authenticate, async (req, res) => {
 // DELETE /api/tasks/:id — manager of the dept / Leader / Co-Leader
 router.delete('/:id', authenticate, async (req, res) => {
   const task = await db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
+  if (!task || !(await deptInClub(task.department_id, req.user.club_id))) return res.status(404).json({ error: 'Task not found' });
   if (!canManage(req.user, task.department_id)) {
     return res.status(403).json({ error: 'Only this department\'s manager or club leaders can delete tasks' });
   }

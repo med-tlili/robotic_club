@@ -14,7 +14,7 @@ const { setIO } = require('./notify');
 const { JWT_SECRET } = require('./middleware/auth');
 const {
   PUBLIC_DIR, PRIVATE_DIR, ensureDirs, verifySignedUpload, migrateLegacyUploads,
-  BLOB, servePublicUpload, servePrivateUpload,
+  BLOB, servePublicUpload, servePrivateUpload, uploadSetHeaders,
 } = require('./storage');
 
 const authRoutes = require('./routes/auth');
@@ -27,6 +27,7 @@ const applicationsRoutes = require('./routes/applications');
 const tasksRoutes = require('./routes/tasks');
 const notificationsRoutes = require('./routes/notifications');
 const chatRoutes = require('./routes/chat');
+const meetingsRoutes = require('./routes/meetings');
 const reportsRoutes = require('./routes/reports');
 const mediaRoutes = require('./routes/media');
 const hrRoutes = require('./routes/hr');
@@ -34,9 +35,29 @@ const plansRoutes = require('./routes/plans');
 const financeRoutes = require('./routes/finance');
 const storageRoutes = require('./routes/storage');
 
+// ---- CORS: same-origin by default (production/LAN), dev allowed locally ----
+// Auth is Bearer-token based (no cookies), so this is defence-in-depth —
+// cross-origin browser callers need an explicit origin allowlist (CORS_ORIGIN,
+// comma-separated) or a localhost dev server. Requests without an Origin
+// header (curl, server-to-server, same-origin GETs) are unaffected.
+//
+// NOTE: both the `cors` package and Socket.io invoke this as
+// `origin(originString, callback)` — NOT `(req, callback)`. Passing `req`
+// here previously made the check a no-op (the whole function was ignored by
+// `cors()`), which silently served `Access-Control-Allow-Origin: *`.
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || '').split(',').map((s) => s.trim()).filter(Boolean);
+const DEV_ORIGIN_RE = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+const isDevHost = !process.env.VERCEL && process.env.NODE_ENV !== 'production';
+function corsCheck(origin, callback) {
+  if (origin && (ALLOWED_ORIGINS.includes(origin) || (isDevHost && DEV_ORIGIN_RE.test(origin)))) {
+    return callback(null, origin);
+  }
+  callback(null, false); // no CORS headers: browsers block cross-origin reads
+}
+
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+const io = new Server(server, { cors: { origin: corsCheck } });
 
 // On Vercel the app runs as several function instances — the Redis adapter
 // makes chat/notification events reach sockets connected to OTHER instances.
@@ -51,8 +72,17 @@ if (REDIS_URL) {
   console.log('Socket.io: Redis adapter active (multi-instance)');
 }
 
-app.use(cors());
-app.use(express.json());
+app.use(cors({ origin: corsCheck }));
+// baseline security headers (defence-in-depth; the SPA is same-origin, and
+// uploads already carry nosniff themselves). No CSP here — the client loads
+// the Jitsi iframe and inline styles, so a strict CSP belongs to the host/proxy.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+app.use(express.json({ limit: '1mb' }));
 
 // Uploaded media (see storage.js):
 //  - /uploads/public  → feed images (published content, guests may view)
@@ -63,8 +93,10 @@ if (BLOB) {
   app.use('/uploads/public', (req, res) => servePublicUpload(req, res));
   app.use('/uploads/private', verifySignedUpload, (req, res) => servePrivateUpload(req, res));
 } else {
-  app.use('/uploads/public', express.static(PUBLIC_DIR));
-  app.use('/uploads/private', verifySignedUpload, express.static(PRIVATE_DIR));
+  // served with nosniff (+ sandbox CSP for any legacy scriptable document type)
+  const staticOpts = { setHeaders: (res, filePath) => uploadSetHeaders(res, filePath) };
+  app.use('/uploads/public', express.static(PUBLIC_DIR, staticOpts));
+  app.use('/uploads/private', verifySignedUpload, express.static(PRIVATE_DIR, staticOpts));
 }
 
 // Routes
@@ -78,6 +110,7 @@ app.use('/api/applications', applicationsRoutes);
 app.use('/api/tasks', tasksRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/meetings', meetingsRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/hr', hrRoutes);
@@ -85,7 +118,15 @@ app.use('/api/plans', plansRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/storage', storageRoutes);
 
-app.get('/api/health', (req, res) => res.json({ status: 'ok', club: 'ISIGK Robotics' }));
+// Ops health check — `demo` tells the login page whether seeded demo
+// accounts exist; `auth_configured` is false when JWT_SECRET is missing
+// (every auth route then answers 503 until it is set).
+app.get('/api/health', (req, res) => res.json({
+  status: 'ok',
+  club: 'ISIGK Robotics',
+  demo: db.demo === true,
+  auth_configured: !!JWT_SECRET,
+}));
 
 // Socket.io — authenticated via JWT; each user joins room 'user:<id>'
 // so notifications and chat can be pushed live.
@@ -94,7 +135,7 @@ io.use(async (socket, next) => {
   if (!token) return next(new Error('Missing token'));
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    const fresh = await db.prepare('SELECT id, full_name, role, department_id FROM users WHERE id = ?').get(payload.id);
+    const fresh = await db.prepare('SELECT id, full_name, role, club_id, department_id FROM users WHERE id = ?').get(payload.id);
     if (!fresh) return next(new Error('Account no longer exists'));
     socket.user = fresh;
     next();
@@ -106,8 +147,10 @@ io.on('connection', async (socket) => {
   const u = socket.user;
   socket.join(`user:${u.id}`);
   try {
-    // group chat rooms the user belongs to — joined automatically
-    (await chatRoutes.roomsForUser(u)).forEach((key) => socket.join(`room:${key}`));
+    // group chat rooms the user belongs to — joined automatically.
+    // The socket room name is prefixed with the club id so two clubs can
+    // never share a 'global'/'managers'/'dept' socket room.
+    (await chatRoutes.roomsForUser(u)).forEach((key) => socket.join(`room:${u.club_id}:${key}`));
   } catch (e) {
     console.error('[socket] room join failed:', e.message);
   }

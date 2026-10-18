@@ -2,11 +2,12 @@
 //  routes/applications.js — guest → member pipeline
 //  Rules (README): a Guest applies to join a department;
 //  the Leader/Co-Leader (or the manager of that department)
-//  accepts or refuses. Professor: read-only, sees everything.
+//  accepts or refuses. Supervisor: read-only, sees everything.
 // ============================================================
 const express = require('express');
 const db = require('../db');
 const { authenticate } = require('../middleware/auth');
+const { deptInClub } = require('../deptPerms');
 const { notify, notifyMany } = require('../notify');
 
 const router = express.Router();
@@ -14,7 +15,7 @@ const router = express.Router();
 const isBoss = (role) => ['leader', 'coleader'].includes(role);
 
 // GET /api/applications — who may see what:
-//   Leader/Co-Leader + Professor: all
+//   Leader/Co-Leader + Supervisor: all
 //   Manager: only applications for his own department
 router.get('/', authenticate, async (req, res) => {
   const rows = await db.prepare(`
@@ -24,11 +25,12 @@ router.get('/', authenticate, async (req, res) => {
     JOIN users u ON u.id = a.user_id
     JOIN departments d ON d.id = a.department_id
     LEFT JOIN users r ON r.id = a.reviewed_by
+    WHERE d.club_id = ?
     ORDER BY (a.status = 'pending') DESC, a.created_at DESC
-  `).all();
+  `).all(req.user.club_id);
 
   const visible = rows.filter((a) => {
-    if (isBoss(req.user.role) || req.user.role === 'professor') return true;
+    if (isBoss(req.user.role) || req.user.role === 'supervisor') return true;
     if (req.user.role === 'manager') return a.department_id === req.user.department_id;
     return false;
   });
@@ -41,7 +43,7 @@ router.post('/', authenticate, async (req, res) => {
     return res.status(403).json({ error: 'Only guests can apply to join a department' });
   }
   const { department_id, message } = req.body || {};
-  const dept = await db.prepare('SELECT * FROM departments WHERE id = ?').get(Number(department_id));
+  const dept = await db.prepare('SELECT * FROM departments WHERE id = ? AND club_id = ?').get(Number(department_id), req.user.club_id);
   if (!dept || dept.slug === 'materials') return res.status(400).json({ error: 'Choose a valid department' });
 
   const pending = await db.prepare(
@@ -55,8 +57,8 @@ router.post('/', authenticate, async (req, res) => {
 
   // notify the reviewers: Leader + Co-Leader + this department's manager
   const reviewers = (await db.prepare(
-    "SELECT id FROM users WHERE role IN ('leader','coleader') OR (role='manager' AND department_id = ?)"
-  ).all(dept.id)).map((r) => r.id);
+    "SELECT id FROM users WHERE (role IN ('leader','coleader') OR (role='manager' AND department_id = ?)) AND club_id = ?"
+  ).all(dept.id, req.user.club_id)).map((r) => r.id);
   await notifyMany(reviewers, {
     type: 'application',
     title: 'New membership application',
@@ -78,7 +80,7 @@ router.get('/mine', authenticate, async (req, res) => {
 });
 
 // helper: may this user review applications for this department?
-// (Professor is deliberately excluded — read-only everywhere.)
+// (Supervisor is deliberately excluded — read-only everywhere.)
 function canReview(user, deptId) {
   if (['leader', 'coleader'].includes(user.role)) return true;
   return user.role === 'manager' && user.department_id === deptId;
@@ -87,7 +89,7 @@ function canReview(user, deptId) {
 // POST /api/applications/:id/accept — applicant becomes a member of that dept
 router.post('/:id/accept', authenticate, async (req, res) => {
   const app = await db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
-  if (!app) return res.status(404).json({ error: 'Application not found' });
+  if (!app || !(await deptInClub(app.department_id, req.user.club_id))) return res.status(404).json({ error: 'Application not found' });
   if (app.status !== 'pending') return res.status(409).json({ error: 'Already reviewed' });
   if (!canReview(req.user, app.department_id)) {
     return res.status(403).json({ error: 'Only the Leader, Co-Leader or this department\'s manager can review' });
@@ -110,7 +112,7 @@ router.post('/:id/accept', authenticate, async (req, res) => {
 // POST /api/applications/:id/refuse
 router.post('/:id/refuse', authenticate, async (req, res) => {
   const app = await db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
-  if (!app) return res.status(404).json({ error: 'Application not found' });
+  if (!app || !(await deptInClub(app.department_id, req.user.club_id))) return res.status(404).json({ error: 'Application not found' });
   if (app.status !== 'pending') return res.status(409).json({ error: 'Already reviewed' });
   if (!canReview(req.user, app.department_id)) {
     return res.status(403).json({ error: 'Only the Leader, Co-Leader or this department\'s manager can review' });

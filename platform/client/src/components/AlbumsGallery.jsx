@@ -1,22 +1,33 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Images, ChevronDown, ChevronUp } from 'lucide-react';
 import { api, BASE } from '../api';
 import { Skeleton, EmptyState } from './ui';
 
 /* ============================================================
-   Media home · ALBUMS — every club member browses the
-   department's albums straight from the public page (managing
+   Department home · ALBUMS — every club member browses the
+   department's albums straight from its public page (managing
    albums stays in the private workspace). A card per album with
    its real cover photo; clicking opens the album inline.
+   A window event keeps it in sync with the workspace below.
    ============================================================ */
-export default function AlbumsGallery() {
+export default function AlbumsGallery({ dept }) {
   const [albums, setAlbums] = useState(null);
   const [error, setError] = useState('');
   const [openId, setOpenId] = useState(null);
 
+  const load = useCallback(() => {
+    api(`/media/albums?department_id=${dept.id}`)
+      .then(setAlbums).catch((e) => { setError(e.message); setAlbums([]); });
+  }, [dept.id]);
+
+  useEffect(() => { setAlbums(null); load(); }, [load]);
+
+  // the workspace tools dispatch this after creating/uploading/deleting
   useEffect(() => {
-    api('/media/albums').then(setAlbums).catch((e) => { setError(e.message); setAlbums([]); });
-  }, []);
+    const refresh = () => load();
+    window.addEventListener('isigk:albums', refresh);
+    return () => window.removeEventListener('isigk:albums', refresh);
+  }, [load]);
 
   if (error) return <div className="banner error">{error}</div>;
   if (albums === null) return <Skeleton h={180} />;
@@ -26,7 +37,7 @@ export default function AlbumsGallery() {
   return (
     <section className="section">
       <div className="section-head">
-        <span className="eyebrow members"><span className="dot" />Albums · club members</span>
+        <span className="eyebrow members"><span className="dot" />{dept.name} albums · club members</span>
         <span className="text-faint text-xs row" style={{ gap: 6 }}>
           <Images size={13} />
           {photos} {photos === 1 ? 'photo' : 'photos'} in {albums.length} {albums.length === 1 ? 'album' : 'albums'}
@@ -38,7 +49,7 @@ export default function AlbumsGallery() {
           <EmptyState
             icon={Images}
             title="No albums yet"
-            text="The Media team publishes albums here — every club member can open them."
+            text={`The ${dept.name} team publishes albums here — every club member can open them.`}
           />
         </div></div>
       ) : (

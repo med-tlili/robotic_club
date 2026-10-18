@@ -4,14 +4,15 @@ import { Search, Users, MessageSquare, Settings2, Trash2, UserPlus } from 'lucid
 import { useAuth } from '../auth';
 import { api } from '../api';
 import { ROLE_LABELS, DEPT_LABELS, isLeader } from '../roles';
-import { Avatar, RolePill, EmptyState, Skeleton } from '../components/ui';
+import { Avatar, RolePill, EmptyState, Skeleton, useModal } from '../components/ui';
 
 const ALL = 'all';
 
 /* Members directory — search by name, filter by role + department.
    Guests never reach this page (guarded in App routes + API).
    Leader/Co-Leader additionally manage roles, departments, removal
-   and CREATE all accounts; the Professor creates LEADER accounts. */
+   and CREATE all accounts; the Supervisor creates LEADER accounts
+   and can add further SUPERVISORS (a club may have several). */
 export default function Members() {
   const { user } = useAuth();
   const nav = useNavigate();
@@ -25,7 +26,7 @@ export default function Members() {
   const [creating, setCreating] = useState(false);
 
   const canManage = isLeader(user.role);
-  const canCreate = user.role === 'professor' || canManage;
+  const canCreate = user.role === 'supervisor' || canManage;
 
   const load = () => {
     api('/users').then(setMembers).catch((e) => { setError(e.message); setMembers([]); });
@@ -54,8 +55,15 @@ export default function Members() {
     return [...new Set(members.map((m) => m.role))];
   }, [members]);
 
-  if (error) return <div className="banner error">{error}</div>;
-  if (members === null) return <Skeleton h={380} />;
+  if (members === null && !error) return <Skeleton h={380} />;
+  if (error && (!members || members.length === 0)) {
+    return (
+      <div className="banner error row" style={{ gap: 10 }}>
+        <span className="grow">{error}</span>
+        <button className="btn sm secondary" onClick={load}>Retry</button>
+      </div>
+    );
+  }
 
   return (
     <div className="stack">
@@ -69,7 +77,7 @@ export default function Members() {
         {canCreate && (
           <div className="head-meta">
             <button className="btn sm" onClick={() => setCreating(true)}>
-              <UserPlus size={14} /> {user.role === 'professor' ? 'Create leader account' : 'Create account'}
+              <UserPlus size={14} /> Create account
             </button>
           </div>
         )}
@@ -131,7 +139,7 @@ export default function Members() {
             </thead>
             <tbody>
               {filtered.map((m) => {
-                const protectedRole = ['leader', 'coleader', 'professor'].includes(m.role);
+                const protectedRole = ['leader', 'coleader', 'supervisor'].includes(m.role);
                 const canEditThis = canManage && !protectedRole && m.id !== user.id;
                 return (
                 <tr
@@ -191,7 +199,7 @@ export default function Members() {
 
       {creating && (
         <CreateModal
-          onlyLeader={user.role === 'professor'}
+          isSupervisor={user.role === 'supervisor'}
           departments={departments}
           onClose={() => setCreating(false)}
           onCreated={() => { setCreating(false); load(); }}
@@ -200,8 +208,8 @@ export default function Members() {
 
       <p className="text-faint text-xs">
         Directory access:{' '}
-        {user.role === 'professor'
-          ? 'supervisor view — read-only, except creating the Leader account (the chain starts with you)'
+        {user.role === 'supervisor'
+          ? 'supervisor view — read-only, except creating the Leader and further Supervisors (the chain starts with you)'
           : canManage
             ? 'full club visibility · create accounts with the button above · manage roles with the ⚙ button'
             : 'all members except guests'}.
@@ -211,16 +219,17 @@ export default function Members() {
 }
 
 /* ---------- create modal — the onboarding chain ----------
-   Professor: creates a LEADER (fixed role).
+   Supervisor: creates a LEADER or another SUPERVISOR.
    Leader/Co-Leader: creates co-leader / manager / member / guest. */
-function CreateModal({ onlyLeader, departments, onClose, onCreated }) {
+function CreateModal({ isSupervisor, departments, onClose, onCreated }) {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState(onlyLeader ? 'leader' : 'member');
+  const [role, setRole] = useState(isSupervisor ? 'leader' : 'member');
   const [deptId, setDeptId] = useState(departments[0]?.id ?? '');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const modalRef = useModal(onClose, busy);
 
   const needsDept = role === 'member' || role === 'manager';
 
@@ -246,9 +255,12 @@ function CreateModal({ onlyLeader, departments, onClose, onCreated }) {
 
   return (
     <div className="modal-scrim" onClick={busy ? undefined : onClose}>
-      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+      <form
+        className="modal" ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="create-modal-title"
+        onClick={(e) => e.stopPropagation()} onSubmit={submit}
+      >
         <div className="panel-head">
-          <h2><UserPlus size={15} /> {onlyLeader ? 'Create leader account' : 'Create account'}</h2>
+          <h2 id="create-modal-title"><UserPlus size={15} /> Create account</h2>
         </div>
         <div className="panel-body stack" style={{ gap: 10 }}>
           {error && <div className="banner error">{error}</div>}
@@ -273,9 +285,12 @@ function CreateModal({ onlyLeader, departments, onClose, onCreated }) {
           <div className="field">
             <label htmlFor="c-role">Role</label>
             <select id="c-role" className="select" value={role}
-              disabled={onlyLeader} onChange={(e) => setRole(e.target.value)}>
-              {onlyLeader ? (
-                <option value="leader">Leader</option>
+              onChange={(e) => setRole(e.target.value)}>
+              {isSupervisor ? (
+                <>
+                  <option value="leader">Leader</option>
+                  <option value="supervisor">Supervisor</option>
+                </>
               ) : (
                 <>
                   <option value="coleader">Co-Leader</option>
@@ -296,9 +311,9 @@ function CreateModal({ onlyLeader, departments, onClose, onCreated }) {
             </div>
           )}
           <p className="text-faint text-xs">
-            {onlyLeader
-              ? 'The chain starts with you: the Leader you create will then create every other account.'
-              : 'You create all other accounts — Leader accounts come from the Professor.'}
+            {isSupervisor
+              ? 'The chain starts with you: create the Leader who will then create every other account — or add another Supervisor to share the responsibility.'
+              : 'You create all other accounts — Supervisor and Leader accounts come from the Supervisor.'}
           </p>
           <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
             <button type="button" className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
@@ -317,6 +332,7 @@ function ManageModal({ member, departments, onClose, onSaved }) {
   const [deptId, setDeptId] = useState(member.department_id ?? departments[0]?.id ?? '');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const modalRef = useModal(onClose, busy);
 
   const save = async (e) => {
     e.preventDefault();
@@ -344,9 +360,12 @@ function ManageModal({ member, departments, onClose, onSaved }) {
 
   return (
     <div className="modal-scrim" onClick={busy ? undefined : onClose}>
-      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={save}>
+      <form
+        className="modal" ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="manage-modal-title"
+        onClick={(e) => e.stopPropagation()} onSubmit={save}
+      >
         <div className="panel-head">
-          <h2><Settings2 size={15} /> Manage — {member.full_name}</h2>
+          <h2 id="manage-modal-title"><Settings2 size={15} /> Manage — {member.full_name}</h2>
         </div>
         <div className="panel-body stack" style={{ gap: 10 }}>
           {error && <div className="banner error">{error}</div>}

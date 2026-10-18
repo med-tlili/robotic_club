@@ -5,6 +5,16 @@ const API = `${BASE}/api`;
 
 export function getToken() { return localStorage.getItem('token'); }
 
+// Central session handling: an expired/revoked token (401) clears the
+// session and sends the user back to /login instead of leaving a silently
+// broken UI. Wrong-password 401s on the login form itself are untouched.
+function handleUnauthorized(path) {
+  if (!getToken()) return;
+  if (path.startsWith('/auth/login') || path.startsWith('/auth/me')) return;
+  localStorage.removeItem('token');
+  if (!window.location.pathname.startsWith('/login')) window.location.assign('/login');
+}
+
 export async function api(path, options = {}) {
   const res = await fetch(`${API}${path}`, {
     ...options,
@@ -16,6 +26,11 @@ export async function api(path, options = {}) {
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    if (res.status === 401) handleUnauthorized(path);
+    const err = new Error(data.error || `HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   return data;
 }

@@ -2,13 +2,13 @@
 //  routes/chat.js — club chat (global / managers / dept / private)
 //  Rules (README):
 //   - Global chat: all club members (Manager, Member, Leader,
-//     Co-Leader, Professor)
-//   - Managers chat: 4 managers + Leader + Co-Leader + Professor
+//     Co-Leader, Supervisor)
+//   - Managers chat: 4 managers + Leader + Co-Leader + Supervisor
 //   - Department chats: that dept's members + Leader/Co-Leader
-//     + Professor (bosses see every department)
+//     + Supervisor (bosses see every department)
 //   - Private 1↔1: any two non-guest users
 //   - Anyone who can open a room can post in it — including the
-//     Professor (he stays read-only on content management, not chat)
+//     Supervisor (he stays read-only on content management, not chat)
 //   - Guests: no chat at all (403 everywhere)
 //   - Attachments: images (preview) + pdf/zip/mp4 (link), max 15MB
 // ============================================================
@@ -48,16 +48,16 @@ async function canRead(user, key) {
   const boss = ['leader', 'coleader'].includes(user.role);
   switch (kind) {
     case 'global': return true;
-    case 'managers': return ['manager', 'leader', 'coleader', 'professor'].includes(user.role);
+    case 'managers': return ['manager', 'leader', 'coleader', 'supervisor'].includes(user.role);
     case 'dept': {
-      const dept = await db.prepare('SELECT id FROM departments WHERE id = ?').get(id);
+      const dept = await db.prepare('SELECT id FROM departments WHERE id = ? AND club_id = ?').get(id, user.club_id);
       if (!dept) return false;
-      if (boss || user.role === 'professor') return true;
+      if (boss || user.role === 'supervisor') return true;
       return user.department_id === id && ['manager', 'member'].includes(user.role);
     }
     case 'private': {
       if (!id || id === user.id) return false;
-      const other = await db.prepare('SELECT id, role FROM users WHERE id = ?').get(id);
+      const other = await db.prepare('SELECT id, role FROM users WHERE id = ? AND club_id = ?').get(id, user.club_id);
       return !!other && other.role !== 'guest';
     }
     default: return false;
@@ -67,7 +67,7 @@ async function canRead(user, key) {
 async function canSend(user, key) {
   // everyone who may open a room may post in it (canRead already blocks
   // guests, cross-department members and foreign private threads);
-  // the Professor chats like any other member
+  // the Supervisor chats like any other member
   return await canRead(user, key);
 }
 
@@ -75,16 +75,16 @@ async function canSend(user, key) {
 async function audience(user, key) {
   const { kind, id } = parseRoom(key);
   if (kind === 'global') {
-    return (await db.prepare("SELECT id FROM users WHERE role != 'guest'").all()).map((r) => r.id);
+    return (await db.prepare("SELECT id FROM users WHERE role != 'guest' AND club_id = ?").all(user.club_id)).map((r) => r.id);
   }
   if (kind === 'managers') {
-    return (await db.prepare("SELECT id FROM users WHERE role IN ('manager','leader','coleader','professor')")
-      .all()).map((r) => r.id);
+    return (await db.prepare("SELECT id FROM users WHERE role IN ('manager','leader','coleader','supervisor') AND club_id = ?")
+      .all(user.club_id)).map((r) => r.id);
   }
   if (kind === 'dept') {
     return (await db.prepare(
-      "SELECT id FROM users WHERE department_id = ? OR role IN ('leader','coleader','professor')"
-    ).all(id)).map((r) => r.id);
+      "SELECT id FROM users WHERE (department_id = ? OR role IN ('leader','coleader','supervisor')) AND club_id = ?"
+    ).all(id, user.club_id)).map((r) => r.id);
   }
   // private: the two participants
   return [user.id, id];
@@ -94,10 +94,10 @@ async function audience(user, key) {
 async function roomsForUser(user) {
   if (user.role === 'guest') return [];
   const rooms = ['global'];
-  if (['manager', 'leader', 'coleader', 'professor'].includes(user.role)) rooms.push('managers');
+  if (['manager', 'leader', 'coleader', 'supervisor'].includes(user.role)) rooms.push('managers');
   if (user.department_id) rooms.push(`dept:${user.department_id}`);
-  if (['leader', 'coleader', 'professor'].includes(user.role)) {
-    (await db.prepare('SELECT id FROM departments WHERE coming_soon = 0').all())
+  if (['leader', 'coleader', 'supervisor'].includes(user.role)) {
+    (await db.prepare('SELECT id FROM departments WHERE coming_soon = 0 AND club_id = ?').all(user.club_id))
       .forEach((d) => { if (!rooms.includes(`dept:${d.id}`)) rooms.push(`dept:${d.id}`); });
   }
   return rooms;
@@ -107,7 +107,7 @@ function dmRoom(a, b) {
   return `dm:${Math.min(a, b)}:${Math.max(a, b)}`;
 }
 
-function getMessages(key, beforeId = null) {
+function getMessages(key, beforeId = null, clubId = null) {
   const { kind, id } = parseRoom(key);
   let sql = `
     SELECT m.*, u.full_name, u.role FROM messages m
@@ -123,8 +123,8 @@ function getMessages(key, beforeId = null) {
     sql += ' WHERE m.scope = ? AND m.department_id = ?';
     params.push('dept', id);
   } else {
-    sql += ' WHERE m.scope = ? AND m.department_id IS NULL';
-    params.push(kind);
+    sql += ' WHERE m.scope = ? AND m.department_id IS NULL AND m.club_id = ?';
+    params.push(kind, clubId);
   }
   if (beforeId) { sql += ' AND m.id < ?'; params.push(beforeId); }
   sql += ' ORDER BY m.id DESC LIMIT 50';
@@ -146,8 +146,8 @@ router.get('/rooms', authenticate, async (req, res) => {
       sql += " WHERE m.scope='dept' AND m.department_id=?";
       p.push(id);
     } else {
-      sql += ' WHERE m.scope=? AND m.department_id IS NULL';
-      p.push(kind);
+      sql += ' WHERE m.scope=? AND m.department_id IS NULL AND m.club_id = ?';
+      p.push(kind, req.user.club_id);
     }
     sql += ' ORDER BY m.id DESC LIMIT 1';
     return await db.prepare(sql).get(...p) || null;
@@ -165,8 +165,8 @@ router.get('/rooms', authenticate, async (req, res) => {
       sql += " WHERE m.scope='dept' AND m.department_id=? AND m.sender_id != ?";
       p.push(id, me);
     } else {
-      sql += ' WHERE m.scope=? AND m.department_id IS NULL AND m.sender_id != ?';
-      p.push(kind, me);
+      sql += ' WHERE m.scope=? AND m.department_id IS NULL AND m.club_id = ? AND m.sender_id != ?';
+      p.push(kind, req.user.club_id, me);
     }
     sql += ' AND m.id > ?';
     p.push(read);
@@ -175,13 +175,13 @@ router.get('/rooms', authenticate, async (req, res) => {
 
   const rooms = [];
   rooms.push({ key: 'global', label: 'Global chat', kind: 'global' });
-  if (['manager', 'leader', 'coleader', 'professor'].includes(req.user.role)) {
+  if (['manager', 'leader', 'coleader', 'supervisor'].includes(req.user.role)) {
     rooms.push({ key: 'managers', label: 'Managers chat', kind: 'managers' });
   }
-  // department rooms: own dept for members/managers; ALL depts for leaders/professor
-  const depts = ['leader', 'coleader', 'professor'].includes(req.user.role)
-    ? await db.prepare('SELECT id, name, slug FROM departments WHERE coming_soon = 0').all()
-    : await db.prepare('SELECT id, name, slug FROM departments WHERE id = ?').all(req.user.department_id || -1);
+  // department rooms: own dept for members/managers; ALL depts for leaders/supervisor
+  const depts = ['leader', 'coleader', 'supervisor'].includes(req.user.role)
+    ? await db.prepare('SELECT id, name, slug FROM departments WHERE coming_soon = 0 AND club_id = ?').all(req.user.club_id)
+    : await db.prepare('SELECT id, name, slug FROM departments WHERE id = ? AND club_id = ?').all(req.user.department_id || -1, req.user.club_id);
   depts.forEach((d) => rooms.push({ key: `dept:${d.id}`, label: `${d.name} chat`, kind: 'dept', department_id: d.id }));
 
   const shaped = await Promise.all(rooms.map(async (r) => {
@@ -216,11 +216,11 @@ router.get('/messages', authenticate, async (req, res) => {
   const key = req.query.room;
   if (!(await canRead(req.user, key))) return res.status(403).json({ error: 'No access to this chat' });
   const { kind, id } = parseRoom(key);
-  const { sql, params } = getMessages(key, Number(req.query.before_id) || null);
+  const { sql, params } = getMessages(key, Number(req.query.before_id) || null, req.user.club_id);
   if (kind === 'private') params.push(req.user.id, id, id, req.user.id);
   const rows = (await db.prepare(sql).all(...params)).reverse().map((r) => shapeRow(r, key));
   const peer = kind === 'private'
-    ? await db.prepare('SELECT id, full_name, role, department_id FROM users WHERE id = ?').get(id)
+    ? await db.prepare('SELECT id, full_name, role, department_id FROM users WHERE id = ? AND club_id = ?').get(id, req.user.club_id)
     : null;
   res.json({ messages: rows, peer });
 });
@@ -239,8 +239,8 @@ router.post('/read', authenticate, async (req, res) => {
     maxSql += " WHERE scope='dept' AND department_id=?";
     p.push(id);
   } else {
-    maxSql += ' WHERE scope=? AND department_id IS NULL';
-    p.push(kind);
+    maxSql += ' WHERE scope=? AND department_id IS NULL AND club_id = ?';
+    p.push(kind, req.user.club_id);
   }
   const max = (await db.prepare(maxSql).get(...p)).m;
   await db.prepare(
@@ -270,9 +270,9 @@ router.post('/messages', authenticate, (req, res, next) => {
       if (kind === 'private') recipient = id;
 
       const info = await db.prepare(
-        `INSERT INTO messages (scope, department_id, sender_id, recipient_id, body, attachment, attachment_name)
-         VALUES (?,?,?,?,?,?,?)`
-      ).run(scope, deptId, req.user.id, recipient, body, attachment, attachmentName);
+        `INSERT INTO messages (club_id, scope, department_id, sender_id, recipient_id, body, attachment, attachment_name)
+         VALUES (?,?,?,?,?,?,?,?)`
+      ).run(req.user.club_id, scope, deptId, req.user.id, recipient, body, attachment, attachmentName);
 
       const row = await db.prepare(`
         SELECT m.*, u.full_name, u.role FROM messages m
@@ -293,7 +293,7 @@ router.post('/messages', authenticate, (req, res, next) => {
         if (kind === 'private') {
           io.to(dmRoom(req.user.id, id)).emit('chat:message', shaped);
         } else {
-          io.to(`room:${key}`).emit('chat:message', shaped);
+          io.to(`room:${req.user.club_id}:${key}`).emit('chat:message', shaped);
         }
         for (const uid of await audience(req.user, key)) {
           io.to(`user:${uid}`).emit('chat:activity', { room: key, message: shaped });

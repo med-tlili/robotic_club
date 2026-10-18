@@ -2,18 +2,25 @@ import { useState } from 'react';
 import {
   BrowserRouter, Routes, Route, Link, useNavigate, Navigate, useLocation,
 } from 'react-router-dom';
-import { Bot, LayoutDashboard, Users, Calendar as CalIcon, MessagesSquare, FileText, Menu, X, LogOut, HardDrive } from 'lucide-react';
+import { Bot, LayoutDashboard, Home as HomeIcon, Users, Calendar as CalIcon, MessagesSquare, FileText, Menu, X, LogOut, HardDrive, UserRound, Video, Settings as SettingsIcon, Sun, Moon } from 'lucide-react';
 import { AuthProvider, useAuth } from './auth';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
+import Feed from './pages/Feed';
 import Dashboard from './pages/Dashboard';
 import Members from './pages/Members';
 import DepartmentHome from './pages/DepartmentHome';
 import Chat from './pages/Chat';
+import Meetings from './pages/Meetings';
+import MeetingRoom from './pages/MeetingRoom';
 import Calendar from './pages/Calendar';
 import Reports from './pages/Reports';
 import Storage from './pages/Storage';
+import Profile from './pages/Profile';
+import Settings from './pages/Settings';
+import Terms from './pages/Terms';
 import NotificationsBell from './components/NotificationsBell';
+import { ThemeProvider, useTheme } from './theme.jsx';
 import { ROLE_LABELS, ROLE_COLORS, DEPT_ICONS as DEPT_ICON } from './roles';
 
 /* ---------- navigation model (role-aware) ---------- */
@@ -22,15 +29,20 @@ function useNavGroups() {
   const groups = [
     {
       title: 'Overview',
-      items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard }],
+      items: [
+        { to: '/', label: 'Home', icon: HomeIcon },
+        { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { to: '/profile', label: 'My profile', icon: UserRound },
+        { to: '/settings', label: 'Settings', icon: SettingsIcon },
+      ],
     },
   ];
-  // Reports: Professor only (downloads monthly / yearly / per-dept reports)
-  if (user.role === 'professor') {
+  // Reports: Supervisor only (downloads monthly / yearly / per-dept reports)
+  if (user.role === 'supervisor') {
     groups[0].items.push({ to: '/reports', label: 'Reports', icon: FileText });
   }
-  // Storage: Leader / Co-Leader / Professor (Drive backups + limit alerts)
-  if (['leader', 'coleader', 'professor'].includes(user.role)) {
+  // Storage: Leader / Co-Leader / Supervisor (Drive backups + limit alerts)
+  if (['leader', 'coleader', 'supervisor'].includes(user.role)) {
     groups[0].items.push({ to: '/storage', label: 'Storage', icon: HardDrive });
   }
   // Calendar: everyone (dates are public club info); Members + Chat: not for guests
@@ -39,6 +51,7 @@ function useNavGroups() {
   ];
   if (user.role !== 'guest') {
     clubItems.push({ to: '/chat', label: 'Chat', icon: MessagesSquare });
+    clubItems.push({ to: '/meetings', label: 'Meetings', icon: Video });
     clubItems.push({ to: '/members', label: 'Members', icon: Users });
   }
   groups.push({ title: 'Club', items: clubItems });
@@ -66,7 +79,7 @@ function Sidebar({ open, onClose }) {
       <div className="sidebar-brand">
         <div className="brand-mark"><Bot size={17} /></div>
         <div>
-          ISIGK Robotics
+          {user.club?.name || 'Robotics Club'}
           <small>Club platform</small>
         </div>
       </div>
@@ -134,18 +147,35 @@ function RequireMember({ children }) {
   return children;
 }
 
-/* Reports are Professor-only (mirrors the API rule) */
-function RequireProfessor({ children }) {
+/* Reports are Supervisor-only (mirrors the API rule) */
+function RequireSupervisor({ children }) {
   const { user } = useAuth();
-  if (user.role !== 'professor') return <Navigate to="/" replace />;
+  if (user.role !== 'supervisor') return <Navigate to="/" replace />;
   return children;
 }
 
-/* Storage is Leader / Co-Leader / Professor (mirrors the API rule) */
+/* Storage is Leader / Co-Leader / Supervisor (mirrors the API rule) */
 function RequireStorage({ children }) {
   const { user } = useAuth();
-  if (!['leader', 'coleader', 'professor'].includes(user.role)) return <Navigate to="/" replace />;
+  if (!['leader', 'coleader', 'supervisor'].includes(user.role)) return <Navigate to="/" replace />;
   return children;
+}
+
+/* Quick light/dark switch in the top bar (full control lives in Settings) */
+function ThemeToggle() {
+  const { resolved, setPref } = useTheme();
+  const dark = resolved === 'dark';
+  const label = dark ? 'Switch to light mode' : 'Switch to dark mode';
+  return (
+    <button
+      className="icon-btn"
+      title={label}
+      aria-label={label}
+      onClick={() => setPref(dark ? 'light' : 'dark')}
+    >
+      {dark ? <Sun size={17} /> : <Moon size={17} />}
+    </button>
+  );
 }
 
 function Layout({ children }) {
@@ -153,7 +183,7 @@ function Layout({ children }) {
   const [open, setOpen] = useState(false);
   const location = useLocation();
   // chat is a working surface: it uses the full content width (no 1060px measure)
-  const wide = location.pathname.startsWith('/chat');
+  const wide = location.pathname.startsWith('/chat') || location.pathname.startsWith('/meetings');
   // wait for the /auth/me check before deciding — avoids the login flash on hard refresh
   if (loading) {
     return (
@@ -173,8 +203,9 @@ function Layout({ children }) {
           <button className="icon-btn menu-btn" aria-label="Open navigation" onClick={() => setOpen(true)}>
             <Menu size={19} />
           </button>
-          <span className="title">ISIGK Robotics</span>
+          <span className="title">{user.club?.name || 'Robotics Club'}</span>
           <div className="row topbar-user" style={{ gap: 6, marginLeft: 'auto' }}>
+            <ThemeToggle />
             <NotificationsBell />
             <div className="avatar sm" style={{ background: ROLE_COLORS[user.role] }}>
               {user.full_name[0]}
@@ -189,22 +220,30 @@ function Layout({ children }) {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/" element={<Layout><Dashboard /></Layout>} />
-          <Route path="/calendar" element={<Layout><Calendar /></Layout>} />
-          <Route path="/members" element={<Layout><RequireMember><Members /></RequireMember></Layout>} />
-          <Route path="/departments/:slug" element={<Layout><DepartmentHome /></Layout>} />
-          <Route path="/chat" element={<Layout><RequireMember><Chat /></RequireMember></Layout>} />
-          <Route path="/chat/:userId" element={<Layout><RequireMember><Chat /></RequireMember></Layout>} />
-          <Route path="/reports" element={<Layout><RequireProfessor><Reports /></RequireProfessor></Layout>} />
-          <Route path="/storage" element={<Layout><RequireStorage><Storage /></RequireStorage></Layout>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/" element={<Layout><Feed /></Layout>} />
+            <Route path="/dashboard" element={<Layout><Dashboard /></Layout>} />
+            <Route path="/profile" element={<Layout><Profile /></Layout>} />
+            <Route path="/settings" element={<Layout><Settings /></Layout>} />
+            <Route path="/calendar" element={<Layout><Calendar /></Layout>} />
+            <Route path="/members" element={<Layout><RequireMember><Members /></RequireMember></Layout>} />
+            <Route path="/departments/:slug" element={<Layout><DepartmentHome /></Layout>} />
+            <Route path="/chat" element={<Layout><RequireMember><Chat /></RequireMember></Layout>} />
+            <Route path="/chat/:userId" element={<Layout><RequireMember><Chat /></RequireMember></Layout>} />
+            <Route path="/meetings" element={<Layout><RequireMember><Meetings /></RequireMember></Layout>} />
+            <Route path="/meetings/:id" element={<Layout><RequireMember><MeetingRoom /></RequireMember></Layout>} />
+            <Route path="/reports" element={<Layout><RequireSupervisor><Reports /></RequireSupervisor></Layout>} />
+            <Route path="/storage" element={<Layout><RequireStorage><Storage /></RequireStorage></Layout>} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

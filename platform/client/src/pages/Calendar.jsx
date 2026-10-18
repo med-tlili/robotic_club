@@ -35,16 +35,28 @@ export default function Calendar() {
   const canEdit = ['leader', 'coleader'].includes(user.role);
 
   const load = () => {
+    setError('');
     api('/events').then(setEvents).catch((e) => { setError(e.message); setEvents([]); });
   };
   useEffect(load, []);
 
-  // events grouped by date
+  // events grouped by date — multi-day events (end_date) appear on EVERY
+  // day of their range
   const byDate = useMemo(() => {
     const map = new Map();
     (events || []).forEach((ev) => {
-      if (!map.has(ev.event_date)) map.set(ev.event_date, []);
-      map.get(ev.event_date).push(ev);
+      let d = new Date(ev.event_date + 'T00:00:00');
+      if (Number.isNaN(d.getTime())) return;
+      const end = ev.end_date && ev.end_date >= ev.event_date
+        ? new Date(ev.end_date + 'T00:00:00') : d;
+      let guard = 0;
+      while (d <= end && guard < 366) {
+        const key = iso(d);
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(ev);
+        d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+        guard += 1;
+      }
     });
     return map;
   }, [events]);
@@ -61,8 +73,7 @@ export default function Calendar() {
     setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + delta, 1));
   };
 
-  if (error) return <div className="banner error">{error}</div>;
-  if (events === null) return <Skeleton h={420} />;
+  if (events === null && !error) return <Skeleton h={420} />;
 
   const dayEvents = byDate.get(selected) || [];
   const selDate = new Date(selected + 'T00:00:00');
@@ -85,6 +96,13 @@ export default function Calendar() {
           </button>
         )}
       </header>
+
+      {error && (
+        <div className="banner error row" style={{ gap: 10, marginTop: 12 }}>
+          <span className="grow">{error}</span>
+          <button className="btn sm secondary" onClick={load}>Retry</button>
+        </div>
+      )}
 
       {adding && (
         <EventForm
@@ -141,7 +159,7 @@ export default function Calendar() {
                 {dayEvents.length > 0 && (
                   <span className="cal-dots">
                     {dayEvents.slice(0, 3).map((ev) => (
-                      <span key={ev.id} className={`cal-dot ${ev.event_date < todayISO ? 'past' : ''}`} />
+                      <span key={ev.id} className={`cal-dot ${(ev.end_date || ev.event_date) < todayISO ? 'past' : ''}`} />
                     ))}
                   </span>
                 )}
@@ -189,12 +207,23 @@ export default function Calendar() {
 }
 
 /* ---------- one event row ---------- */
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function rangeLabel(ev) {
+  if (!ev.end_date || ev.end_date <= ev.event_date) return null;
+  const s = new Date(ev.event_date + 'T00:00:00');
+  const e = new Date(ev.end_date + 'T00:00:00');
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return null;
+  const days = Math.round((e - s) / 86400000) + 1;
+  return `${s.getDate()} ${SHORT_MONTHS[s.getMonth()]} → ${e.getDate()} ${SHORT_MONTHS[e.getMonth()]} · ${days} days`;
+}
+
 function EventRow({ ev, canEdit, onChanged }) {
   const remove = async () => {
     if (!window.confirm(`Remove "${ev.title}" from the calendar?`)) return;
     try { await api(`/events/${ev.id}`, { method: 'DELETE' }); onChanged(); }
     catch (e) { alert(e.message); }
   };
+  const range = rangeLabel(ev);
 
   return (
     <article className="panel event-row">
@@ -202,6 +231,7 @@ function EventRow({ ev, canEdit, onChanged }) {
         <strong style={{ fontSize: 14 }}>{ev.title}</strong>
         {ev.description && <p className="text-dim text-sm" style={{ margin: '2px 0 0' }}>{ev.description}</p>}
         <div className="row text-xs text-faint" style={{ gap: 12, marginTop: 4, flexWrap: 'wrap' }}>
+          {range && <span className="row" style={{ gap: 4 }}><CalIcon size={12} /> {range}</span>}
           {ev.event_time && <span className="row" style={{ gap: 4 }}><Clock size={12} /> {ev.event_time}</span>}
           {ev.location && <span className="row" style={{ gap: 4 }}><MapPin size={12} /> {ev.location}</span>}
           {ev.created_by_name && <span className="row" style={{ gap: 4 }}><User size={12} /> {ev.created_by_name}</span>}
@@ -221,10 +251,13 @@ function EventForm({ initialDate, onCancel, onDone }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState(initialDate);
+  const [endDate, setEndDate] = useState('');
   const [time, setTime] = useState('');
   const [location, setLocation] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+
+  const badRange = !!endDate && !!date && endDate < date;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -233,7 +266,7 @@ function EventForm({ initialDate, onCancel, onDone }) {
     try {
       await api('/events', {
         method: 'POST',
-        body: { title, description, event_date: date, event_time: time, location },
+        body: { title, description, event_date: date, end_date: endDate, event_time: time, location },
       });
       onDone();
     } catch (err) { setError(err.message); }
@@ -250,11 +283,17 @@ function EventForm({ initialDate, onCancel, onDone }) {
           <input id="ev-title" className="input" value={title} onChange={(e) => setTitle(e.target.value)}
             placeholder="General assembly, workshop, deadline…" required maxLength={140} />
         </div>
-        <div className="row" style={{ gap: 10 }}>
+        <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
           <div className="field grow">
             <label htmlFor="ev-date">Date</label>
             <input id="ev-date" className="input" type="date" value={date}
               onChange={(e) => setDate(e.target.value)} required />
+          </div>
+          <div className="field grow">
+            <label htmlFor="ev-enddate">End date (optional — multi-day)</label>
+            <input id="ev-enddate" className="input" type="date" value={endDate} min={date}
+              onChange={(e) => setEndDate(e.target.value)}
+              style={badRange ? { borderColor: 'var(--danger)' } : undefined} />
           </div>
           <div className="field grow">
             <label htmlFor="ev-time">Time (optional)</label>
@@ -266,6 +305,7 @@ function EventForm({ initialDate, onCancel, onDone }) {
               placeholder="Lab 203, Amphi A…" />
           </div>
         </div>
+        {badRange && <div className="banner warn">The end date cannot be before the start date.</div>}
         <div className="field">
           <label htmlFor="ev-desc">Description (optional)</label>
           <textarea id="ev-desc" className="textarea" rows={2} value={description}
@@ -273,7 +313,7 @@ function EventForm({ initialDate, onCancel, onDone }) {
         </div>
         <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
           <button type="button" className="btn ghost" onClick={onCancel}>Cancel</button>
-          <button type="submit" className="btn" disabled={busy || !title.trim() || !date}>
+          <button type="submit" className="btn" disabled={busy || !title.trim() || !date || badRange}>
             {busy ? 'Saving…' : 'Save date'}
           </button>
         </div>

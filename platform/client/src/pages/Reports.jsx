@@ -10,12 +10,12 @@ import { Panel, EmptyState, Skeleton } from '../components/ui';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
 const ROLE_LABEL = {
-  professor: 'Professor', leader: 'Leader', coleader: 'Co-Leader',
+  supervisor: 'Supervisor', leader: 'Leader', coleader: 'Co-Leader',
   manager: 'Manager', member: 'Member', guest: 'Guest',
 };
 
 /* ============================================================
-   Reports — Professor only (mirrors the API rule)
+   Reports — Supervisor only (mirrors the API rule)
    Monthly global · full year · per department → preview + PDF
    ============================================================ */
 export default function Reports() {
@@ -74,7 +74,7 @@ export default function Reports() {
       <div className="page-head">
         <div>
           <h1>Club reports</h1>
-          <div className="sub">Activity reports for the supervising Professor · download as PDF</div>
+          <div className="sub">Activity reports for the supervising Supervisor · download as PDF</div>
         </div>
         <div className="head-meta">
           {data && (
@@ -121,7 +121,12 @@ export default function Reports() {
         </div>
       </Panel>
 
-      {error && <div className="banner error">{error}</div>}
+      {error && (
+        <div className="banner error row" style={{ gap: 10 }}>
+          <span className="grow">{error}</span>
+          <button className="btn sm secondary" onClick={load}>Retry</button>
+        </div>
+      )}
       {!data && !error && <Skeleton h={280} />}
 
       {data && (

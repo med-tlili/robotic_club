@@ -16,13 +16,20 @@ function canManageDept(user, deptId) {
 
 // can this user VIEW this department's private tools?
 function canViewDept(user, deptId) {
-  if (isLeader(user) || user.role === 'professor') return true;
+  if (isLeader(user) || user.role === 'supervisor') return true;
   if (user.role === 'guest') return false;
   return user.department_id === deptId;
 }
 
-async function getDept(slug) {
-  return await db.prepare('SELECT * FROM departments WHERE slug = ?').get(slug);
+async function getDept(slug, clubId) {
+  return await db.prepare('SELECT * FROM departments WHERE slug = ? AND club_id = ?').get(slug, clubId);
 }
 
-module.exports = { isLeader, canManageDept, canViewDept, getDept };
+// Does this department belong to the given club? (the core of tenant isolation)
+async function deptInClub(deptId, clubId) {
+  if (!deptId) return false;
+  const row = await db.prepare('SELECT 1 AS ok FROM departments WHERE id = ? AND club_id = ?').get(deptId, clubId);
+  return !!row;
+}
+
+module.exports = { isLeader, canManageDept, canViewDept, getDept, deptInClub };

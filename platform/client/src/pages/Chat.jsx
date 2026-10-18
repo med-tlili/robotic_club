@@ -14,14 +14,15 @@ import { connectSocket, getSocket } from '../socket';
 /* ============================================================
    Chat — global / managers / department / private (1↔1)
    Guests: no access (App routes already block /chat for guests)
-   Professor: chats like any member (read-only on content, not on chat)
+   Supervisor: chats like any member (read-only on content, not on chat)
    ============================================================ */
 export default function Chat() {
   const { userId } = useParams();
   const { user } = useAuth();
   const nav = useNavigate();
   const [rooms, setRooms] = useState(null);
-  const [members, setMembers] = useState([]);
+  const [members, setMembers] = useState(null); // null = loading
+  const [membersError, setMembersError] = useState('');
   const [activeKey, setActiveKey] = useState(userId ? `private:${userId}` : 'global');
   const [showList, setShowList] = useState(true); // mobile: list vs conversation
 
@@ -31,12 +32,14 @@ export default function Chat() {
   useEffect(() => { loadRooms(); }, [loadRooms]);
 
   // member directory for the private-message list (all except guests)
-  useEffect(() => {
-    if (user.role === 'guest') return;
+  const loadMembers = useCallback(() => {
+    if (user.role === 'guest') { setMembers([]); return; }
+    setMembersError('');
     api('/users').then((all) => setMembers(
       all.filter((m) => m.id !== user.id && m.role !== 'guest'),
-    )).catch(() => setMembers([]));
+    )).catch((e) => { setMembersError(e.message); setMembers([]); });
   }, [user]);
+  useEffect(() => { loadMembers(); }, [loadMembers]);
 
   // switching /chat/:userId keeps the URL in sync
   useEffect(() => {
@@ -52,8 +55,8 @@ export default function Chat() {
   if (rooms === null) return <Skeleton h={440} />;
 
   const isBoss = ['leader', 'coleader'].includes(user.role);
-  // the professor takes part in every room he can see, incl. the managers chat
-  const seesManagers = ['manager', 'leader', 'coleader', 'professor'].includes(user.role);
+  // the supervisor takes part in every room he can see, incl. the managers chat
+  const seesManagers = ['manager', 'leader', 'coleader', 'supervisor'].includes(user.role);
 
   return (
     <div className="chat-layout">
@@ -95,8 +98,15 @@ export default function Chat() {
             </div>
 
             <div className="room-section-label">Private messages</div>
-            {members.length === 0 ? (
+            {members === null ? (
               <div className="text-dim text-sm" style={{ padding: '6px 10px' }}>Loading members…</div>
+            ) : membersError ? (
+              <div className="text-dim text-xs" style={{ padding: '6px 10px' }}>
+                {membersError}{' '}
+                <button className="btn ghost sm" onClick={loadMembers}>Retry</button>
+              </div>
+            ) : members.length === 0 ? (
+              <div className="text-dim text-sm" style={{ padding: '6px 10px' }}>No other members yet.</div>
             ) : (
               <div className="room-list">
                 {members.map((m) => {
@@ -168,7 +178,7 @@ function Conversation({ roomKey, user, onActivity, onBack }) {
   // guests never reach this screen — App routes block /chat for them)
   const canWriteRoom = user.role !== 'guest';
 
-  useEffect(() => {
+  const load = useCallback(() => {
     setMessages(null);
     setError('');
     api(`/chat/messages?room=${encodeURIComponent(roomKey)}`)
@@ -177,6 +187,10 @@ function Conversation({ roomKey, user, onActivity, onBack }) {
     api('/chat/read', { method: 'POST', body: { room: roomKey } })
       .then(onActivity)
       .catch(() => {});
+  }, [roomKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    load();
     // socket: join DM room / listen for live messages
     const socket = connectSocket();
     if (socket) {
@@ -228,7 +242,16 @@ function Conversation({ roomKey, user, onActivity, onBack }) {
     finally { setBusy(false); }
   };
 
-  if (error && messages === null) return <div className="banner error">{error}</div>;
+  if (error && messages !== null && messages.length === 0) {
+    return (
+      <div className="chat-main" style={{ padding: 16 }}>
+        <div className="banner error row" style={{ gap: 10 }}>
+          <span className="grow">{error}</span>
+          <button className="btn sm secondary" onClick={load}>Retry</button>
+        </div>
+      </div>
+    );
+  }
   if (messages === null) return <Skeleton h={440} />;
 
   const title = roomKey === 'global' ? 'Global chat'

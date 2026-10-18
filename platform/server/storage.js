@@ -31,7 +31,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 const { JWT_SECRET } = require('./middleware/auth');
 
-const UPLOAD_ROOT = path.join(__dirname, 'uploads');
+const UPLOAD_ROOT = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
 const PUBLIC_DIR = path.join(UPLOAD_ROOT, 'public');
 const PRIVATE_DIR = path.join(UPLOAD_ROOT, 'private');
 
@@ -50,10 +50,22 @@ function ensureDirs() {
 }
 
 // ---- filenames: random + extension only, original kept in the DB ----
-function randomName(original) {
-  const ext = path.extname(original || '').toLowerCase().replace(/[^.a-z0-9]/g, '');
-  const safeExt = /^[.a-z0-9]{1,8}$/.test(ext) ? ext : '';
-  return `${Date.now().toString(36)}-${crypto.randomBytes(8).toString('hex')}${safeExt}`;
+// The extension comes from the VALIDATED mimetype when known, and is
+// otherwise restricted to the same allowlist — a client-supplied ".html"
+// / ".svg" / ".xml" name can never land on disk (stored-XSS guard; files
+// are served same-origin with nosniff).
+const MIME_EXT = {
+  'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp',
+  'application/pdf': '.pdf', 'application/zip': '.zip', 'video/mp4': '.mp4',
+};
+const SAFE_EXT = new Set(Object.values(MIME_EXT));
+function randomName(original, mimetype) {
+  let ext = (mimetype && MIME_EXT[mimetype]) || '';
+  if (!ext) {
+    const raw = path.extname(original || '').toLowerCase().replace(/[^.a-z0-9]/g, '');
+    ext = SAFE_EXT.has(raw) ? raw : '';
+  }
+  return `${Date.now().toString(36)}-${crypto.randomBytes(8).toString('hex')}${ext}`;
 }
 
 // multer storage for either tree: makeStorage('public' | 'private')
@@ -64,7 +76,7 @@ function makeStorage(which) {
     // (filename/size/path) so route code keeps working unchanged.
     return {
       _handleFile(req, file, cb) {
-        const name = randomName(file.originalname);
+        const name = randomName(file.originalname, file.mimetype);
         const key = `uploads/${which}/${name}`;
         const chunks = [];
         file.stream.on('data', (c) => chunks.push(c));
@@ -88,7 +100,7 @@ function makeStorage(which) {
   const dir = which === 'public' ? PUBLIC_DIR : PRIVATE_DIR;
   return multer.diskStorage({
     destination: (req, file, cb) => cb(null, dir),
-    filename: (req, file, cb) => cb(null, randomName(file.originalname)),
+    filename: (req, file, cb) => cb(null, randomName(file.originalname, file.mimetype)),
   });
 }
 
@@ -98,9 +110,12 @@ function signature(relPath, expires) {
     .update(`${relPath}|${expires}`).digest('base64url');
 }
 
-// DB path → ready-to-use URL (public paths pass through untouched)
+// DB path → ready-to-use URL (public paths pass through untouched).
+// Without a secret (misconfigured production) nothing can be signed —
+// verifySignedUpload rejects every private request, so fail closed here.
 function signPath(relPath) {
   if (!relPath || !relPath.startsWith('/uploads/private/')) return relPath;
+  if (!JWT_SECRET) return relPath;
   const expires = Math.floor(Date.now() / 1000) + SIGN_TTL_SECONDS;
   return `${relPath}?e=${expires}&s=${signature(relPath, expires)}`;
 }
@@ -140,6 +155,7 @@ async function servePrivateUpload(req, res) {
     const r = await fetch(meta.url);
     if (!r.ok || !r.body) return res.status(404).json({ error: 'File not found' });
     res.setHeader('Content-Type', meta.contentType || 'application/octet-stream');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     if (meta.contentLength) res.setHeader('Content-Length', meta.contentLength);
     res.setHeader('Cache-Control', 'private, max-age=86400'); // matches the 24h signature
     const { Readable } = require('stream');
@@ -175,7 +191,7 @@ async function deleteUpload(relPath) {
 async function copyToPublic(relPath) {
   if (BLOB) {
     if (!relPath || !relPath.startsWith('/uploads/private/')) throw new Error('Source file missing');
-    const name = `copy-${randomName(path.extname(relPath))}`;
+    const name = `copy-${randomName(relPath)}`;
     await blob().copy(keyOf(relPath), `uploads/public/${name}`, {
       access: 'public', token: BLOB_TOKEN,
     });
@@ -183,7 +199,7 @@ async function copyToPublic(relPath) {
   }
   const src = resolveUpload(relPath);
   if (!src || !fs.existsSync(src)) throw new Error('Source file missing');
-  const name = `copy-${randomName(path.extname(relPath))}`;
+  const name = `copy-${randomName(relPath)}`;
   fs.copyFileSync(src, path.join(PUBLIC_DIR, name));
   return `/uploads/public/${name}`;
 }
@@ -274,6 +290,18 @@ async function migrateLegacyUploads(db) {
   if (moved) console.log(`Media storage: moved ${moved} legacy file(s) into uploads/public|private.`);
 }
 
+// ---- headers on every served upload ----
+// nosniff stops the browser from re-interpreting a file as HTML; the extra
+// sandbox CSP only applies to scriptable document types (legacy files with
+// a dangerous extension — new uploads can no longer produce one).
+const DANGEROUS_DOC = /\.(html?|xhtml|shtml|svg|xml|php|js|mjs|css)$/i;
+function uploadSetHeaders(res, filePath) {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  if (filePath && DANGEROUS_DOC.test(String(filePath))) {
+    res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
+  }
+}
+
 module.exports = {
   UPLOAD_ROOT, PUBLIC_DIR, PRIVATE_DIR, BLOB,
   ensureDirs, makeStorage,
@@ -282,4 +310,5 @@ module.exports = {
   deleteUpload, copyToPublic, makeThumb,
   stageUploadsTo,
   migrateLegacyUploads,
+  uploadSetHeaders,
 };
