@@ -188,10 +188,41 @@ Open **http://localhost:5173** — database and demo accounts are created automa
 
 **Production env:** `JWT_SECRET` → **required** (a long random string; without it the server refuses to authenticate — auth routes answer 503 instead of falling back to a forgeable default) · `ISIGK_DEMO_ACCOUNTS=0` → *no demo accounts/content are seeded* (real install: **no club at all** until the first visitor opens `/signup` and **creates the club** — they become its Supervisor — then builds it) · `DB_PATH` → where `club.db` lives (default: `platform/server/club.db` — point it at your persistent disk) · `PORT` · `CORS_ORIGIN` → comma-separated extra allowed browser origins (optional; same-origin deployments need nothing) · `CRON_SECRET` → guards the backup cron (Vercel).
 
-### ☁️ Hosted club — Vercel (recommended: works everywhere, no PC to keep on)
+### 🟢 Hosted club — Render (free, **full product**: live chat + large uploads)
 
-The site is a single Vercel project: the Express API (with Socket.io) as a serverless
-function + the built React client as static files. One-time setup (~15 minutes):
+**Recommended when you want every feature online for $0.** Render runs the app as a
+normal long-lived Node process (not a serverless function), so **Socket.io live
+chat/notifications work** and the 4.5 MB serverless upload cap does not apply.
+The free web service sleeps after 15 min idle (~30–60 s cold start) and includes
+750 instance-hours/month; the database and uploads live off-instance (**Turso** +
+**Vercel Blob**), so nothing is lost on sleep or redeploy.
+
+The repo ships a ready **`render.yaml`** blueprint:
+
+1. **Turso** (turso.tech — free 5 GB, no card): create a database, copy its URL,
+   and mint a token (`turso db create isigk-club` · `turso db show isigk-club --url`
+   · `turso db tokens create isigk-club`).
+2. **Vercel Blob** (vercel.com → Storage → Blob — free Hobby 1 GB): create a store
+   and copy **`BLOB_READ_WRITE_TOKEN`**.
+3. **Render** → *New → Blueprint* → pick `med-tlili/robotic_club`. It reads
+   `render.yaml` and asks for `TURSO_URL`, `TURSO_AUTH_TOKEN` and
+   `BLOB_READ_WRITE_TOKEN`; `JWT_SECRET` is generated for you.
+4. **Deploy** → open `https://<service>.onrender.com` → **`/signup` → Create your
+   club** (you become its Supervisor).
+5. Run the smoke test in **HANDOVER §6.5**.
+
+Optional backup: an external free cron (e.g. cron-job.org) can call
+`GET /api/storage/cron-sync` with `Authorization: Bearer <CRON_SECRET>`; without
+it the app simply skips backups and Turso remains the source of truth.
+
+### ☁️ Hosted club — Vercel (serverless; simplest, but **no live Socket.io**)
+
+The site is a single Vercel project: the Express API as a serverless function +
+the built React client as static files. **On Vercel the server never calls
+`server.listen()`, so Socket.io does not start** — chat history/sending still work
+over HTTP, but your own new messages appear only after a reload and notifications
+are not pushed live. Use **Render (above)** for the full product. One-time setup
+(~15 minutes):
 
 1. **Import the repo** on vercel.com → *Add New → Project* → `med-tlili/robotic_club`
    (the root `vercel.json` already knows how to build both halves).
@@ -221,9 +252,10 @@ A daily Vercel Cron checks "is this month backed up yet?" and runs the push once
 a month (Hobby plans allow daily crons only — the handler skips the other days).
 
 Notes: uploads over ~4.5 MB are rejected by Vercel (the app re-encodes large images
-automatically; keep videos small) · live chat works through the Redis adapter ·
-the hosted database is backed up to Drive monthly; everything is restoreable from
-`club-export.json` + the uploads tree.
+automatically; keep videos small) · **live chat is not available on Vercel** (the
+serverless handler never starts `server.listen()`, so Socket.io cannot attach) —
+Render or self-hosting gives you live chat · the hosted database is backed up to
+Drive monthly; everything is restoreable from `club-export.json` + the uploads tree.
 
 ### 🖥️ Self-host (own machine or school server)
 

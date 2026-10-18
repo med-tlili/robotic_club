@@ -1,0 +1,42 @@
+# ============================================================
+#  render.yaml — Render Blueprint (free plan, full product)
+#
+#  A long-running Node service (not serverless), so Socket.io live
+#  chat/notifications work and the 4.5 MB serverless body cap does
+#  not apply. Persistence comes from Turso (database) + Vercel Blob
+#  (uploads) because Render's free web services have no disk.
+#
+#  Render → New → Blueprint → pick this repo. It will ask for the
+#  three secrets below (sync: false) on the first deploy.
+#
+#  Free-tier notes: 750 instance-hours/month; the service sleeps
+#  after 15 min without traffic (~30–60 s cold start). Database and
+#  uploads survive sleep/redeploy because they live off-instance.
+# ============================================================
+services:
+  - type: web
+    name: isigk-robotics-club
+    runtime: node
+    plan: free
+    region: frankfurt
+    autoDeploy: true
+    healthCheckPath: /api/health
+    buildCommand: npm --prefix platform/client ci && npm --prefix platform/client run build && npm --prefix platform/server ci --omit=dev
+    startCommand: node platform/server/start-prod.js
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: ISIGK_DEMO_ACCOUNTS
+        value: "0"
+      # Render generates this once and keeps it across deploys.
+      - key: JWT_SECRET
+        generateValue: true
+      # Fill these in the Render dashboard (see README §13 / HANDOVER §6).
+      - key: TURSO_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      - key: BLOB_READ_WRITE_TOKEN
+        sync: false

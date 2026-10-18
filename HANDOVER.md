@@ -236,11 +236,44 @@ Carried or newly identified, in priority order:
 
 ---
 
-## 6. Deploying to Vercel (free tier) — manual steps
+## 6. Deploying (free tier) — Render (full product) or Vercel (serverless)
 
-> **Not performed.** These are the exact steps for the user. Nothing was pushed.
+> **Not performed.** These are the exact steps for the user. The code is pushed
+> to `origin/main`; use **6.0 (Render)** for the full product. **6.1–6.6 (Vercel)**
+> work, but Vercel cannot run Socket.io with this code (see 6.1).
 
-### 6.1 Push the code
+### 6.0 Option A — Render (recommended: live chat + large uploads)
+
+Render runs a normal long-lived Node process, so **Socket.io works** and the
+4.5 MB serverless body cap does not apply. The repo ships **`render.yaml`**.
+
+1. **Turso** (free 5 GB, no card): `turso db create isigk-club`;
+   `turso db show isigk-club --url`; `turso db tokens create isigk-club`.
+2. **Vercel → Storage → Blob** (free Hobby 1 GB): create a store and copy
+   `BLOB_READ_WRITE_TOKEN`.
+3. **Render → New → Blueprint** → select `med-tlili/robotic_club`; `render.yaml`
+   sets Node 22, the build (`client ci + build`, `server ci --omit=dev`), the
+   start command (`node platform/server/start-prod.js`), the health check, and
+   asks for `TURSO_URL`, `TURSO_AUTH_TOKEN`, `BLOB_READ_WRITE_TOKEN`.
+   `JWT_SECRET` is generated; `ISIGK_DEMO_ACCOUNTS=0` is preset.
+4. Deploy → `https://<service>.onrender.com/api/health` should return
+   `{"status":"ok","auth_configured":true,"demo":false}`.
+5. Open `/signup` → create the club, then run **6.5** (skip the Vercel-specific
+   notes).
+
+**Free-tier caveats:** 750 instance-hours/month · sleeps after 15 min without
+traffic, ~30–60 s to wake (Socket.io reconnects automatically) · Turso and Blob
+persist everything, so no Render disk is needed. Optional monthly backup: point
+an external cron at `GET /api/storage/cron-sync` with
+`Authorization: Bearer <CRON_SECRET>`.
+
+### 6.1 Option B (Vercel) — push the code
+
+> **Caveat:** Vercel loads `index.js` via `module.exports` and the boot code
+> returns before `server.listen()` (`if (process.env.VERCEL) return;`), so
+> **Socket.io never starts**. Chat history and sending work over HTTP, but a
+> sent text message only appears after reload and notifications are not live.
+> Use 6.0 for the full product.
 ```bash
 git add platform vercel.json README.md PROJECT_REPORT.txt HANDOVER.md
 git commit -m "Security hardening, multi-club, home feed, post types + reactions, meetings"
