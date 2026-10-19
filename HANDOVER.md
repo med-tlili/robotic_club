@@ -252,8 +252,8 @@ Render runs a normal long-lived Node process, so **Socket.io works** and the
 2. **Vercel → Storage → Blob** (free Hobby 1 GB): create a store and copy
    `BLOB_READ_WRITE_TOKEN`.
 3. **Render → New → Blueprint** → select `med-tlili/robotic_club`; `render.yaml`
-   sets Node 22, the build (`client ci + build`, `server ci --omit=dev`), the
-   start command (`node platform/server/start-prod.js`), the health check, and
+   sets Node 22, the build (`client ci --include=dev + build`, `server ci --omit=dev`),
+   the start command (`node platform/server/start-prod.js`), the health check, and
    asks for `TURSO_URL`, `TURSO_AUTH_TOKEN`, `BLOB_READ_WRITE_TOKEN`.
    `JWT_SECRET` is generated; `ISIGK_DEMO_ACCOUNTS=0` is preset.
 4. Deploy → `https://<service>.onrender.com/api/health` should return
