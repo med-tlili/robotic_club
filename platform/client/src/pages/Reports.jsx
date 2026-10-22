@@ -4,7 +4,7 @@ import {
   Inbox, MessagesSquare, Building2,
 } from 'lucide-react';
 import { api, getToken, BASE } from '../api';
-import { DEPT_LABELS } from '../roles';
+import { ROLE_LABELS } from '../roles';
 import { Panel, EmptyState, Skeleton } from '../components/ui';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -114,7 +114,7 @@ export default function Reports() {
             <select id="r-dept" className="select" value={deptId} onChange={(e) => setDeptId(e.target.value)}>
               <option value="">Whole club (global)</option>
               {departments.filter((d) => !d.coming_soon).map((d) => (
-                <option key={d.id} value={d.id}>{DEPT_LABELS[d.slug] || d.name}</option>
+                <option key={d.id} value={d.id}>{d.name}</option>
               ))}
             </select>
           </div>

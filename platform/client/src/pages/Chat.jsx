@@ -256,7 +256,7 @@ function Conversation({ roomKey, user, onActivity, onBack }) {
 
   const title = roomKey === 'global' ? 'Global chat'
     : roomKey === 'managers' ? 'Managers chat'
-      : roomKey.startsWith('dept:') ? `${DEPT_LABELS[peer?.department_slug] || 'Department'} chat`
+      : roomKey.startsWith('dept:') ? (peer?.label || `${DEPT_LABELS[peer?.department_slug] || 'Department'} chat`)
         : peer?.full_name || 'Private chat';
 
   return (

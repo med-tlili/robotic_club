@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   BrowserRouter, Routes, Route, Link, useNavigate, Navigate, useLocation,
 } from 'react-router-dom';
-import { Bot, LayoutDashboard, Home as HomeIcon, Users, Calendar as CalIcon, MessagesSquare, FileText, Menu, X, LogOut, HardDrive, UserRound, Video, Settings as SettingsIcon, Sun, Moon } from 'lucide-react';
+import { Bot, LayoutDashboard, Home as HomeIcon, Users, Calendar as CalIcon, MessagesSquare, FileText, Menu, X, LogOut, HardDrive, UserRound, Video, Settings as SettingsIcon, Sun, Moon, Building2 } from 'lucide-react';
+import { api } from './api';
 import { AuthProvider, useAuth } from './auth';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
@@ -24,8 +25,36 @@ import { ThemeProvider, useTheme } from './theme.jsx';
 import { ROLE_LABELS, ROLE_COLORS, DEPT_ICONS as DEPT_ICON } from './roles';
 
 /* ---------- navigation model (role-aware) ---------- */
+// Shown until the club's departments arrive (and if the request ever fails).
+const DEFAULT_DEPTS = [
+  { slug: 'hr', name: 'HR', coming_soon: 0 },
+  { slug: 'events', name: 'Events', coming_soon: 0 },
+  { slug: 'media', name: 'Media', coming_soon: 0 },
+  { slug: 'finance', name: 'Finance', coming_soon: 0 },
+  { slug: 'materials', name: 'Materials', coming_soon: 1 },
+];
+// The starter "Human Resources" is shown as "HR" in the rail until it is renamed
+function navLabel(d) {
+  if (d.slug === 'hr' && d.name === 'Human Resources') return 'HR';
+  return d.name;
+}
+
 function useNavGroups() {
   const { user } = useAuth();
+  // Departments are per-club and the Leader can add more: read the real list
+  // instead of hardcoding the five starter ones.
+  const [departments, setDepartments] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () => api('/departments')
+      .then((ds) => { if (alive) setDepartments(ds); })
+      .catch(() => { /* keep the starter list on a transient failure */ });
+    load();
+    // the Members page dispatches this after creating a department
+    window.addEventListener('isigk:departments', load);
+    return () => { alive = false; window.removeEventListener('isigk:departments', load); };
+  }, [user.club?.id]);
+
   const groups = [
     {
       title: 'Overview',
@@ -55,15 +84,16 @@ function useNavGroups() {
     clubItems.push({ to: '/members', label: 'Members', icon: Users });
   }
   groups.push({ title: 'Club', items: clubItems });
+  const depts = departments ?? DEFAULT_DEPTS;
   groups.push({
     title: 'Departments',
-    items: [
-      { to: '/departments/hr', label: 'HR', icon: null, slug: 'hr' },
-      { to: '/departments/events', label: 'Events', icon: null, slug: 'events' },
-      { to: '/departments/media', label: 'Media', icon: null, slug: 'media' },
-      { to: '/departments/finance', label: 'Finance', icon: null, slug: 'finance' },
-      { to: '/departments/materials', label: 'Materials', icon: null, slug: 'materials', tag: 'soon' },
-    ],
+    items: depts.map((d) => ({
+      to: `/departments/${d.slug}`,
+      label: navLabel(d),
+      icon: null,
+      slug: d.slug,
+      tag: d.coming_soon ? 'soon' : undefined,
+    })),
   });
   return groups;
 }
@@ -98,7 +128,7 @@ function Sidebar({ open, onClose }) {
           <div className="nav-group" key={g.title}>
             <div className="nav-group-title">{g.title}</div>
             {g.items.map((item) => {
-              const Icon = item.icon || (item.slug && (DEPT_ICON[item.slug]));
+              const Icon = item.icon || (item.slug ? (DEPT_ICON[item.slug] || Building2) : null);
               const active = item.to === '/'
                 ? location.pathname === '/'
                 : location.pathname.startsWith(item.to);

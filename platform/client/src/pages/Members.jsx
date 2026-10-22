@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Users, MessageSquare, Settings2, Trash2, UserPlus } from 'lucide-react';
+import { Search, Users, MessageSquare, Settings2, Trash2, UserPlus, Building2, Plus } from 'lucide-react';
 import { useAuth } from '../auth';
 import { api } from '../api';
-import { ROLE_LABELS, DEPT_LABELS, isLeader } from '../roles';
+import { ROLE_LABELS, isLeader } from '../roles';
 import { Avatar, RolePill, EmptyState, Skeleton, useModal } from '../components/ui';
 
 const ALL = 'all';
@@ -24,6 +24,7 @@ export default function Members() {
   const [deptFilter, setDeptFilter] = useState(ALL);
   const [managing, setManaging] = useState(null); // member being edited
   const [creating, setCreating] = useState(false);
+  const [creatingDept, setCreatingDept] = useState(false);
 
   const canManage = isLeader(user.role);
   const canCreate = user.role === 'supervisor' || canManage;
@@ -79,6 +80,11 @@ export default function Members() {
             <button className="btn sm" onClick={() => setCreating(true)}>
               <UserPlus size={14} /> Create account
             </button>
+            {canManage && (
+              <button className="btn sm secondary" onClick={() => setCreatingDept(true)}>
+                <Building2 size={14} /> New department
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -163,7 +169,7 @@ export default function Members() {
                   </td>
                   <td><RolePill role={m.role} /></td>
                   <td className="hide-sm text-dim">
-                    {m.department_name ? DEPT_LABELS[m.department_slug] || m.department_name : '—'}
+                    {m.department_name || '—'}
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     {canEditThis ? (
@@ -206,12 +212,25 @@ export default function Members() {
         />
       )}
 
+      {creatingDept && (
+        <CreateDepartmentModal
+          onClose={() => setCreatingDept(false)}
+          onCreated={(dept) => {
+            setCreatingDept(false);
+            load();
+            // the sidebar reads the real department list — tell it to refresh
+            window.dispatchEvent(new Event('isigk:departments'));
+            nav(`/departments/${dept.slug}`);
+          }}
+        />
+      )}
+
       <p className="text-faint text-xs">
         Directory access:{' '}
         {user.role === 'supervisor'
           ? 'supervisor view — read-only, except creating the Leader and further Supervisors (the chain starts with you)'
           : canManage
-            ? 'full club visibility · create accounts with the button above · manage roles with the ⚙ button'
+            ? 'full club visibility · create accounts and whole departments with the buttons above · manage roles with the ⚙ button'
             : 'all members except guests'}.
       </p>
     </div>
@@ -319,6 +338,157 @@ function CreateModal({ isSupervisor, departments, onClose, onCreated }) {
             <button type="button" className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
             <button type="submit" className="btn" disabled={busy}>
               {busy ? 'Creating…' : 'Create account'}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/* ---------- create a whole department ----------
+   Leader/Co-Leader: names the department and can create its first manager
+   and members in the same request. The server validates the whole form
+   before writing anything, so a bad email never leaves a half department. */
+const EMPTY_PERSON = { full_name: '', email: '', password: '' };
+
+function CreateDepartmentModal({ onClose, onCreated }) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [manager, setManager] = useState({ ...EMPTY_PERSON });
+  const [members, setMembers] = useState([]);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const modalRef = useModal(onClose, busy);
+
+  const setMgr = (field) => (e) => setManager((m) => ({ ...m, [field]: e.target.value }));
+  const setMember = (i, field) => (e) => setMembers((list) => list.map(
+    (m, j) => (j === i ? { ...m, [field]: e.target.value } : m),
+  ));
+  const addMember = () => setMembers((list) => [...list, { ...EMPTY_PERSON }]);
+  const removeMember = (i) => setMembers((list) => list.filter((_, j) => j !== i));
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    const clean = (p) => ({
+      full_name: p.full_name.trim(), email: p.email.trim().toLowerCase(), password: p.password,
+    });
+    const mgr = clean(manager);
+    const managerTouched = !!(mgr.full_name || mgr.email || mgr.password);
+    if (managerTouched && (!mgr.full_name || !mgr.email || !mgr.password)) {
+      setError("Complete the manager's name, email and password — or leave all three empty.");
+      return;
+    }
+    const rows = members.map(clean);
+    const incomplete = rows.findIndex(
+      (m) => (m.full_name || m.email || m.password) && (!m.full_name || !m.email || !m.password),
+    );
+    if (incomplete !== -1) {
+      setError(`Complete member ${incomplete + 1}'s name, email and password — or remove the row.`);
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await api('/departments', {
+        method: 'POST',
+        body: {
+          name: name.trim(),
+          description: description.trim(),
+          manager: managerTouched ? mgr : undefined,
+          members: rows.filter((m) => m.full_name && m.email && m.password),
+        },
+      });
+      onCreated(r.department);
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="modal-scrim" onClick={busy ? undefined : onClose}>
+      <form
+        className="modal" ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="dept-modal-title"
+        style={{ maxWidth: 580 }} onClick={(e) => e.stopPropagation()} onSubmit={submit}
+      >
+        <div className="panel-head">
+          <h2 id="dept-modal-title"><Building2 size={15} /> Create a department</h2>
+        </div>
+        <div className="panel-body stack" style={{ gap: 12 }}>
+          {error && <div className="banner error">{error}</div>}
+
+          <div className="field">
+            <label htmlFor="d-name">Department name</label>
+            <input id="d-name" className="input" value={name} required maxLength={60}
+              placeholder="e.g. Competition Team"
+              onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="d-desc">What it does <span className="text-faint">(optional)</span></label>
+            <input id="d-desc" className="input" value={description} maxLength={500}
+              placeholder="One line shown on the department page"
+              onChange={(e) => setDescription(e.target.value)} />
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+            <strong style={{ fontSize: 13 }}>First manager <span className="text-faint text-xs">(optional)</span></strong>
+            <p className="text-faint text-xs" style={{ margin: '4px 0 8px' }}>
+              The manager gets the department workspace: tasks, albums and its tools.
+            </p>
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              <input className="input" style={{ flex: '1 1 150px' }} aria-label="Manager full name"
+                placeholder="Full name" value={manager.full_name}
+                onChange={setMgr('full_name')} autoComplete="off" />
+              <input className="input" style={{ flex: '1 1 170px' }} aria-label="Manager email"
+                type="email" placeholder="Email" value={manager.email}
+                onChange={setMgr('email')} autoComplete="off" />
+              <input className="input" style={{ flex: '1 1 150px' }} aria-label="Manager password"
+                type="password" placeholder="Password (6+)" value={manager.password}
+                onChange={setMgr('password')} autoComplete="new-password" />
+            </div>
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+            <div className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
+              <strong style={{ fontSize: 13 }}>First members <span className="text-faint text-xs">(optional)</span></strong>
+              <button type="button" className="btn ghost sm" onClick={addMember}>
+                <Plus size={14} /> Add member
+              </button>
+            </div>
+            {members.length === 0 ? (
+              <p className="text-faint text-xs" style={{ margin: '4px 0 0' }}>
+                Add teammates now, or create them later from the Members page.
+              </p>
+            ) : (
+              <div className="stack" style={{ gap: 8, marginTop: 8 }}>
+                {members.map((m, i) => (
+                  <div className="row" key={i} style={{ gap: 8, flexWrap: 'wrap' }}>
+                    <input className="input" style={{ flex: '1 1 150px' }} aria-label={`Member ${i + 1} full name`}
+                      placeholder={`Member ${i + 1} — full name`} value={m.full_name}
+                      onChange={setMember(i, 'full_name')} autoComplete="off" />
+                    <input className="input" style={{ flex: '1 1 170px' }} aria-label={`Member ${i + 1} email`}
+                      type="email" placeholder="Email" value={m.email}
+                      onChange={setMember(i, 'email')} autoComplete="off" />
+                    <input className="input" style={{ flex: '1 1 150px' }} aria-label={`Member ${i + 1} password`}
+                      type="password" placeholder="Password (6+)" value={m.password}
+                      onChange={setMember(i, 'password')} autoComplete="new-password" />
+                    <button type="button" className="icon-btn" title={`Remove member ${i + 1}`}
+                      aria-label={`Remove member ${i + 1}`} onClick={() => removeMember(i)}>
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <p className="text-faint text-xs" style={{ margin: 0 }}>
+            The department gets its own page, feed, albums and team. You can add more managers and members
+            from the Members page at any time.
+          </p>
+          <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+            <button type="button" className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
+            <button type="submit" className="btn" disabled={busy}>
+              {busy ? 'Creating…' : 'Create department'}
             </button>
           </div>
         </div>

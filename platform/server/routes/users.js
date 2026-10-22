@@ -15,7 +15,7 @@ router.get('/', authenticate, async (req, res) => {
     return res.status(403).json({ error: 'Guests cannot see the members directory' });
   }
   const users = await db.prepare(`
-    SELECT u.id, u.full_name, u.role, u.bio, u.department_id, d.name AS department_name, d.slug AS department_slug
+    SELECT u.id, u.email, u.full_name, u.role, u.bio, u.department_id, d.name AS department_name, d.slug AS department_slug
     FROM users u LEFT JOIN departments d ON d.id = u.department_id
     WHERE u.club_id = ?
     ORDER BY u.full_name

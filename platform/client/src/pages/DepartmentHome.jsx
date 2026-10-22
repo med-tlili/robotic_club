@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
-  Target, Lock, Eye, Megaphone, ArrowRight,
+  Target, Lock, Eye, Megaphone, ArrowRight, Settings2, Trash2,
 } from 'lucide-react';
 import { useAuth } from '../auth';
 import { api } from '../api';
-import { DEPT_LABELS, isBoss } from '../roles';
-import { Skeleton, DeptIcon, ToolBlock, Avatar } from '../components/ui';
+import { isBoss, isLeader } from '../roles';
+import { Skeleton, DeptIcon, ToolBlock, Avatar, useModal } from '../components/ui';
 import PostFeed from '../components/PostFeed';
 import AlbumsGallery from '../components/AlbumsGallery';
 import TasksPanel from '../components/TasksPanel';
@@ -21,8 +21,10 @@ import { HrTools, AlbumTools, EventsTools, FinanceTools } from '../components/De
 export default function DepartmentHome() {
   const { slug } = useParams();
   const { user } = useAuth();
+  const nav = useNavigate();
   const [dept, setDept] = useState(null);
   const [error, setError] = useState('');
+  const [editing, setEditing] = useState(false);
 
   const load = () => {
     setDept(null);
@@ -46,8 +48,13 @@ export default function DepartmentHome() {
   const inDept = user.department_id === dept.id;
   const boss = isBoss(user.role); // supervisor included → read-only view of everything
   const canPrivate = inDept || boss;
-  const label = DEPT_LABELS[dept.slug] || dept.name;
+  const canEdit = isLeader(user.role);
+  const label = dept.name;
   const meta = DEPT_INFO[dept.slug] || {};
+  // a custom description wins over the built-in starter pitch
+  const purpose = dept.description && dept.description !== STARTER_DESC[dept.slug]
+    ? dept.description
+    : (meta.purpose || dept.description);
 
   return (
     <div className="stack" style={{ gap: 24 }}>
@@ -57,9 +64,16 @@ export default function DepartmentHome() {
           <DeptIcon slug={dept.slug} size={46} />
           <div>
             <h1>{label}</h1>
-            <p className="purpose">{meta.purpose || dept.description}</p>
+            <p className="purpose">{purpose}</p>
           </div>
         </div>
+        {canEdit && (
+          <div className="head-meta">
+            <button className="btn sm secondary" onClick={() => setEditing(true)}>
+              <Settings2 size={14} /> Edit department
+            </button>
+          </div>
+        )}
       </div>
 
       {/* public/private legend — replaces the ambiguous pills */}
@@ -114,6 +128,146 @@ export default function DepartmentHome() {
           <span>The {label} workspace — tasks, department tools and internal chat — is available to the team and club leaders.</span>
         </div>
       )}
+
+      {editing && (
+        <EditDepartmentModal
+          dept={dept}
+          onClose={() => setEditing(false)}
+          onSaved={(updated) => {
+            setEditing(false);
+            setDept((prev) => ({ ...prev, ...updated }));
+            window.dispatchEvent(new Event('isigk:departments'));
+          }}
+          onDeleted={() => {
+            window.dispatchEvent(new Event('isigk:departments'));
+            nav('/members');
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ---------- edit / delete a department ----------
+   Leader/Co-Leader only. Renaming keeps the slug (links stay valid).
+   Deleting first refuses while people are still in the department, then
+   asks for confirmation and lists exactly what will be removed. */
+const STARTER_DESC = {
+  hr: 'Members, attendance and discipline',
+  events: 'Events planning, itineraries and decoration',
+  media: 'Albums, clips and social media',
+  finance: 'Budget, expenses and sponsors',
+  materials: 'Inventory and loans',
+};
+
+function usageSummary(usage) {
+  if (!usage) return 'Checking…';
+  const n = (v, one, many) => `${v} ${v === 1 ? one : many}`;
+  const parts = [];
+  if (usage.posts) parts.push(n(usage.posts, 'post', 'posts'));
+  if (usage.albums) {
+    parts.push(`${n(usage.albums, 'album', 'albums')}${usage.photos ? ` (${usage.photos} photos)` : ''}`);
+  }
+  if (usage.tasks) parts.push(n(usage.tasks, 'task', 'tasks'));
+  if (usage.goals) parts.push(n(usage.goals, 'goal', 'goals'));
+  if (usage.meetings) parts.push(n(usage.meetings, 'meeting', 'meetings'));
+  if (usage.applications) parts.push(n(usage.applications, 'application', 'applications'));
+  if (usage.messages) parts.push(n(usage.messages, 'chat message', 'chat messages'));
+  return parts.length ? parts.join(' · ') : 'no content';
+}
+
+function EditDepartmentModal({ dept, onClose, onSaved, onDeleted }) {
+  const [name, setName] = useState(dept.name);
+  const [description, setDescription] = useState(dept.description || '');
+  const [usage, setUsage] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const modalRef = useModal(onClose, busy);
+
+  useEffect(() => {
+    api(`/departments/${dept.slug}/usage`).then(setUsage).catch(() => setUsage(null));
+  }, [dept.slug]);
+
+  const save = async (e) => {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      const updated = await api(`/departments/${dept.slug}`, {
+        method: 'PATCH',
+        body: { name: name.trim(), description: description.trim() },
+      });
+      onSaved(updated);
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async () => {
+    setError('');
+    if (usage && usage.members > 0) {
+      setError(`Move the ${usage.members} ${usage.members === 1 ? 'person' : 'people'} in ${dept.name} to another department (or remove them) first.`);
+      return;
+    }
+    const ok = window.confirm(
+      `Delete “${dept.name}” permanently?\n\nThis will remove: ${usageSummary(usage)}.\n\nThis cannot be undone.`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await api(`/departments/${dept.slug}?confirm=1`, { method: 'DELETE' });
+      onDeleted();
+    } catch (err) { setError(err.message); setBusy(false); }
+  };
+
+  const blocked = !!usage && usage.members > 0;
+
+  return (
+    <div className="modal-scrim" onClick={busy ? undefined : onClose}>
+      <form
+        className="modal" ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="edit-dept-title"
+        onClick={(e) => e.stopPropagation()} onSubmit={save}
+      >
+        <div className="panel-head">
+          <h2 id="edit-dept-title"><Settings2 size={15} /> Edit department</h2>
+        </div>
+        <div className="panel-body stack" style={{ gap: 12 }}>
+          {error && <div className="banner error">{error}</div>}
+
+          <div className="field">
+            <label htmlFor="e-name">Name</label>
+            <input id="e-name" className="input" value={name} required maxLength={60}
+              onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="e-desc">What it does</label>
+            <input id="e-desc" className="input" value={description} maxLength={500}
+              placeholder="One line shown on the department page"
+              onChange={(e) => setDescription(e.target.value)} />
+          </div>
+          <p className="text-faint text-xs" style={{ margin: 0 }}>
+            The web address stays <span className="mono">/departments/{dept.slug}</span> when you rename it,
+            so existing links keep working.
+          </p>
+
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+            <strong style={{ fontSize: 13, color: 'var(--danger, #b42318)' }}>Delete department</strong>
+            <p className="text-faint text-xs" style={{ margin: '4px 0 8px' }}>
+              {blocked
+                ? `${usage.members} ${usage.members === 1 ? 'person is' : 'people are'} still in this department. Move them from Members first.`
+                : `This department holds: ${usageSummary(usage)}.`}
+            </p>
+            <button type="button" className="btn danger ghost" onClick={remove}
+              disabled={busy || blocked || usage === null}>
+              <Trash2 size={14} /> Delete department
+            </button>
+          </div>
+
+          <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+            <button type="button" className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
+            <button type="submit" className="btn" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</button>
+          </div>
+        </div>
+      </form>
     </div>
   );
 }

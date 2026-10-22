@@ -329,6 +329,16 @@ committing — the commands above only add the platform + docs.
 5. As Supervisor → **Members → Create account** → role **Leader** → log in as
    Leader; optionally add a **second Supervisor** and confirm both belong to
    the club.
+5b. As **Leader** → **Members → New department** → name it (e.g. *Competition
+    Team*), optionally add its first manager + one member → **Create
+    department**. It opens its own page, appears in the **Departments** sidebar,
+    the manager/member can log in, and the Members page lists them under it.
+    (A Supervisor trying the same API call gets **403** — read-only.)
+5c. On that department page → **Edit department** → rename it; the sidebar
+    updates and the URL (`/departments/competition-team`) stays the same.
+    **Delete department** is refused while the manager/member are still in it
+    (move them from Members first); once empty, the confirm dialog lists what
+    will be removed, then the department disappears from the sidebar.
 6. `/calendar` loads; `/profile` saves a name/bio and changes a password.
 7. Upload an image to a **department album** (its manager account) → the card
    shows a cover and the picture opens (Blob backend + signed URLs). Confirm

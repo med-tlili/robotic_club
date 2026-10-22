@@ -76,7 +76,8 @@ loose folders.
       - Supervisor -> "Create account" (Members page): role Leader, or
         another Supervisor (a club may have several)
       - Leader / Co-Leader -> create every other account
-      (Co-Leader, Manager, Member, Guest)
+      (Co-Leader, Manager, Member, Guest) AND whole departments
+      (POST /api/departments, optionally with the first manager/members)
   * Manager / Member / Guest -> 403, no self-registration endpoint exists
   * Self-service profile: every signed-in user edits their OWN name/bio and
     password (PATCH /api/users/me, POST /api/users/me/password). Role and
@@ -96,8 +97,9 @@ loose folders.
                 Leader accounts AND adding further Supervisors. Chats like a
                 member. CAN vote. Downloads reports (monthly / yearly / dept).
   Leader        Full control: departments, chats, assigns goals, owns the
-                global calendar, promotes/removes users, creates accounts.
-  Co-Leader     Same powers as Leader, including creating accounts.
+                global calendar, promotes/removes users, creates accounts,
+                creates whole departments (+ their first manager/members).
+  Co-Leader     Same powers as Leader, including accounts and departments.
   Manager       Own department (HR / Events / Media / Finance): public home
                 content, private space, tasks, department chat.
   Member        Belongs to 1 department: tasks, chats, votes, directory.
@@ -627,9 +629,13 @@ club_robotic/
                        GET me
     /api/users         GET directory (not guest) · POST create account (chain)
                        PATCH /me + POST /me/password (self-service profile)
-    /api/departments   GET list (your club) · GET :slug (your club; member
-                       list decided server-side by role)
-                       GET :slug/private (dept members + bosses)
+    /api/departments   GET list (your club) · POST create a department
+                       (Leader/Co-Leader) with optional manager + members ·
+                       PATCH :slug rename/re-describe (slug stays) ·
+                       GET :slug/usage (what a delete affects) ·
+                       DELETE :slug (people -> 409; content needs ?confirm=1) ·
+                       GET :slug (your club; member list decided server-side
+                       by role) · GET :slug/private (dept members + bosses)
     /api/goals         GET · POST (Leader/Co-Leader)
     /api/posts         GET ?department_id= (one dept) · GET /feed (the CLUB
                        home feed: all depts, club-scoped, cursor-paginated)
@@ -760,11 +766,14 @@ club_robotic/
     club-export.json + the uploads tree (manual script documented in the
     Storage panel and the README).
 
-  Test coverage (2026-10-19): 61/61 across nine isolated suites in
+  Test coverage (2026-10-20): 75/75 across eleven isolated suites in
     platform/server/test/ — auth · signup_chain (fresh DB, 0 demo accounts;
-    create-club + two-club isolation + plural Supervisors) · migration (legacy
-    DB → one club, and the phase-4 posts/votes table rebuild) · calendar
-    (auth + role matrix) ·
+    create-club + two-club isolation + plural Supervisors) · departments_admin
+    (Leader-built departments, full department with manager/members, slug
+    collisions, validation rollback, role 403s, per-club slugs, rename with a
+    stable slug, delete safety/cascade/usage) · migration
+    (legacy DB → one club, and the phase-4 posts/votes table rebuild) ·
+    calendar (auth + role matrix) ·
     permissions (role/IDOR matrix) · workflows (post types, Yes/No/Maybe
     reactions, polls, comments, tasks, profile, home feed) · meetings
     (creation rules, host-approved joining + self-accept refusal, scope
@@ -809,6 +818,29 @@ club_robotic/
     2026-10-17  LAN mode: START-SERVER.bat, firewall rule, LAN addresses
     2026-10-17  HOSTING PIVOT: Vercel — async libsql everywhere, Vercel Blob,
                 Redis chat adapter, pure-Node Drive backups, daily cron
+    2026-10-20  LEADER-BUILT DEPARTMENTS (user: "the leader can create a
+                full department"): new POST /api/departments (Leader/Co-Leader
+                only; Supervisor/manager/member/guest -> 403). Creates a
+                department with a per-club unique slug (competition-team,
+                -2, ...) and optionally its first manager and members in the
+                same request. The whole form is validated before any write
+                (duplicate email in form -> 400, existing account -> 409) and
+                an unexpected failure rolls back. Client: "New department"
+                on Members -> name/description + optional manager + add/remove
+                member rows; the sidebar now loads the real per-club
+                department list (generic icon, isigk:departments refresh)
+                instead of five hardcoded links. GET /api/users now returns
+                email (the directory already rendered it). Same request adds
+                PATCH /api/departments/:slug (rename / description, slug
+                stable) and DELETE /api/departments/:slug: refused while
+                people remain; for content it requires ?confirm=1 and shows
+                the usage (posts/albums/photos/tasks/goals/meetings/
+                applications/messages); confirmed deletes run in FK-safe
+                order (votes, comments, polls, shared_post_id cleared, album
+                media, meeting chats) then remove the files. Department page
+                gains "Edit department" + danger zone. New departments_admin
+                suite (14 tests): 75/75 across eleven suites; build + lint
+                green.
     2026-10-19  RENDER DEPLOY (full product, free): added render.yaml — a
                 free Render web service (long-running Node, not serverless) so
                 Socket.io live chat/notifications work and the 4.5 MB serverless

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../auth';
 import { api } from '../api';
-import { isBoss, DEPT_LABELS } from '../roles';
+import { isBoss } from '../roles';
 import { Panel, Skeleton, RolePill, Avatar, DeptIcon } from '../components/ui';
 import SupervisorGraphs from '../components/SupervisorGraphs';
 
@@ -159,7 +159,7 @@ function RecentPosts({ dept, limit = 3 }) {
     >
       {posts === null ? <Skeleton h={90} /> : posts.length === 0 ? (
         <p className="text-dim text-sm" style={{ margin: 0 }}>
-          No posts yet from the {DEPT_LABELS[dept.slug] || dept.name} team.
+          No posts yet from the {dept.name} team.
         </p>
       ) : (
         <div className="list">
@@ -355,7 +355,7 @@ function ManagerDashboard({ user, departments, goals, members, tasks }) {
         <div className="row" style={{ gap: 14 }}>
           <DeptIcon slug={dept.slug} size={46} />
           <div>
-            <h1>{DEPT_LABELS[dept.slug] || dept.name}</h1>
+            <h1>{dept.name}</h1>
             <div className="sub">You manage this department · {pendingTasks} open {pendingTasks === 1 ? 'task' : 'tasks'}</div>
           </div>
         </div>
@@ -527,7 +527,7 @@ function MemberDashboard({ user, departments, goals, members, tasks }) {
         <div className="row" style={{ gap: 14 }}>
           <DeptIcon slug={dept.slug} size={46} />
           <div>
-            <h1>{DEPT_LABELS[dept.slug] || dept.name}</h1>
+            <h1>{dept.name}</h1>
             <div className="sub">Your department · here's what's on your plate</div>
           </div>
         </div>
